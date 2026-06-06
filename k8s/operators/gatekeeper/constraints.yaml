@@ -1,0 +1,52 @@
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireNonRootUser
+metadata:
+  name: require-non-root-user
+spec:
+  enforcementAction: warn
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces:
+      - ai-pipeline
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireReadOnlyRootFS
+metadata:
+  name: require-read-only-root-fs
+spec:
+  enforcementAction: warn
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces:
+      - ai-pipeline
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireResourceLimits
+metadata:
+  name: require-resource-limits
+spec:
+  enforcementAction: warn
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces:
+      - ai-pipeline
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sBlockLatestImageTag
+metadata:
+  name: block-latest-image-tag
+spec:
+  enforcementAction: warn
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces:
+      - ai-pipeline

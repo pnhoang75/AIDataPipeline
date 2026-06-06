@@ -1,0 +1,132 @@
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequirenonrootuser
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireNonRootUser
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequirenonrootuser
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container_runs_as_non_root(container)
+          msg := sprintf("container <%v> must set securityContext.runAsNonRoot=true", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.initContainers[_]
+          not container_runs_as_non_root(container)
+          msg := sprintf("initContainer <%v> must set securityContext.runAsNonRoot=true", [container.name])
+        }
+
+        container_runs_as_non_root(container) {
+          container.securityContext.runAsNonRoot == true
+        }
+
+        container_runs_as_non_root(container) {
+          container.securityContext.runAsUser > 0
+        }
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequirereadonlyrootfs
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireReadOnlyRootFS
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequirereadonlyrootfs
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.securityContext.readOnlyRootFilesystem == true
+          msg := sprintf("container <%v> must set securityContext.readOnlyRootFilesystem=true", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.initContainers[_]
+          not container.securityContext.readOnlyRootFilesystem == true
+          msg := sprintf("initContainer <%v> must set securityContext.readOnlyRootFilesystem=true", [container.name])
+        }
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequireresourcelimits
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireResourceLimits
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequireresourcelimits
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits.cpu
+          msg := sprintf("container <%v> must set resources.limits.cpu", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits.memory
+          msg := sprintf("container <%v> must set resources.limits.memory", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.initContainers[_]
+          not container.resources.limits.cpu
+          msg := sprintf("initContainer <%v> must set resources.limits.cpu", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.initContainers[_]
+          not container.resources.limits.memory
+          msg := sprintf("initContainer <%v> must set resources.limits.memory", [container.name])
+        }
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sblocklatestimagetag
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sBlockLatestImageTag
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sblocklatestimagetag
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          image_has_latest_tag(container.image)
+          msg := sprintf("container <%v> must not use :latest image tag (image: %v)", [container.name, container.image])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.initContainers[_]
+          image_has_latest_tag(container.image)
+          msg := sprintf("initContainer <%v> must not use :latest image tag (image: %v)", [container.name, container.image])
+        }
+
+        image_has_latest_tag(image) {
+          endswith(image, ":latest")
+        }
+
+        image_has_latest_tag(image) {
+          not contains(image, ":")
+        }

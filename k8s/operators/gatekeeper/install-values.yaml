@@ -1,0 +1,5 @@
+validatingWebhook:
+  failurePolicy: Ignore
+
+mutatingWebhook:
+  failurePolicy: Ignore
