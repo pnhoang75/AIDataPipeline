@@ -1,0 +1,22 @@
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: python-instrumentation
+  namespace: ai-pipeline
+spec:
+  # 10% sampling on testbed
+  sampler:
+    type: traceidratio
+    argument: "0.1"
+  exporter:
+    endpoint: http://pipeline-collector-collector.monitoring.svc.cluster.local:4318
+  propagators:
+    - tracecontext
+    - baggage
+    - b3
+  python:
+    env:
+      - name: OTEL_PYTHON_LOG_CORRELATION
+        value: "true"
+      - name: OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED
+        value: "true"

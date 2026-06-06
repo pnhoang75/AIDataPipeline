@@ -1,0 +1,154 @@
+nameOverride: ""
+fullnameOverride: ""
+
+# Reduce resource footprint for testbed
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: false
+    configReloadRules: false
+    general: true
+    k8sContainerCpuUsageSecondsTotal: true
+    k8sContainerMemoryCache: true
+    k8sContainerMemoryRss: true
+    k8sContainerMemorySwap: true
+    k8sContainerResource: true
+    k8sPodOwner: true
+    kubeApiserverAvailability: false
+    kubeApiserverBurnrate: false
+    kubeApiserverHistogram: false
+    kubeApiserverSlos: false
+    kubeControllerManager: false
+    kubelet: true
+    kubeProxy: false
+    kubePrometheusGeneral: true
+    kubePrometheusNodeRecording: true
+    kubernetesApps: true
+    kubernetesResources: true
+    kubernetesStorage: true
+    kubernetesSystem: true
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeStateMetrics: true
+    network: true
+    node: true
+    nodeExporterAlerting: true
+    nodeExporterRecording: true
+    prometheus: true
+    prometheusOperator: true
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      fsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 1Gi
+
+grafana:
+  enabled: true
+  defaultDashboardsEnabled: true
+  defaultDashboardsTimezone: utc
+  adminPassword: "admin"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 472
+    fsGroup: 472
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    readOnlyRootFilesystem: false
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+  persistence:
+    enabled: false
+
+kubeStateMetrics:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+
+prometheusOperator:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    fsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+
+prometheus:
+  enabled: true
+  prometheusSpec:
+    retention: 7d
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      fsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false

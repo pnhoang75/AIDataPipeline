@@ -1,0 +1,29 @@
+manager:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+
+admissionWebhooks:
+  create: true
+  certManager:
+    enabled: true
+    issuerRef:
+      name: selfsigned-ca
+      kind: ClusterIssuer
+
+securityContext:
+  runAsGroup: 65532
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
