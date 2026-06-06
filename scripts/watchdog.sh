@@ -24,21 +24,19 @@ while true; do
     [ -z "$write_node" ] && continue
 
     # Find all processes whose $6 (pipe-end address) equals write_node — they hold the write end.
-    mapfile -t holders < <(lsof 2>/dev/null \
-      | awk -v node="$write_node" '$6==node && ($4=="1" || $4=="2") {print $2, $1}' \
-      | grep -v "^$tee_pid " | sort -u || true)
-
     has_claude=false
     has_sleep=false
     sleep_pids=()
-    for line in "${holders[@]}"; do
+    while IFS= read -r line; do
       [ -z "$line" ] && continue
       h_pid=$(echo "$line" | awk '{print $1}')
       h_cmd=$(echo "$line" | awk '{print $2}')
       [[ "$h_cmd" == "sleep" ]] && { has_sleep=true; sleep_pids+=("$h_pid"); }
-      # claude shows as its version number (e.g. "2.1.167") — match on numeric pattern
-      [[ "$h_cmd" =~ ^[0-9]+\.[0-9] ]] && has_claude=true
-    done
+      # claude shows as its version number (e.g. "2.1.167") — match numeric-dot pattern
+      echo "$h_cmd" | grep -qE '^[0-9]+\.[0-9]' && has_claude=true
+    done < <(lsof 2>/dev/null \
+      | awk -v node="$write_node" '$6==node && ($4=="1" || $4=="2") {print $2, $1}' \
+      | grep -v "^$tee_pid " | sort -u || true)
 
     # Only kill sleep if claude has already exited from this pipe (session done).
     if $has_sleep && ! $has_claude; then

@@ -50,7 +50,7 @@ SESSIONS_PROMPT_DIR="$REPO_ROOT/scripts/sessions"
 RETRY_LIMIT=3                    # max retries for non-limit errors per session
 USAGE_LIMIT_SLEEP=19800          # 5h30m — safely past the 5h window reset
 USAGE_LIMIT_POLL=1800            # recheck every 30 min after limit hit
-MAX_TURNS=80                     # max agentic turns per claude -p call
+MAX_TURNS=200                    # max agentic turns per claude -p call
 CLAUDE_TIMEOUT=7200              # 2h wall-clock timeout per session (seconds)
 
 # Tools Claude is allowed to use without confirmation.
