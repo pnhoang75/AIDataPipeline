@@ -72,6 +72,8 @@ grafana:
   defaultDashboardsEnabled: true
   defaultDashboardsTimezone: utc
   adminPassword: "admin"
+  podLabels:
+    app: grafana
   resources:
     requests:
       cpu: 50m
