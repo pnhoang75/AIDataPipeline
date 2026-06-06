@@ -1,10 +1,10 @@
 {
-  "current_index": 39,
-  "current_session": "5-A",
+  "current_index": 40,
+  "current_session": "5-B",
   "status": "running",
   "last_completed": "1-A",
   "last_completed_at": "2026-06-06T20:34:33Z",
-  "last_attempt_at": "2026-06-06T22:21:50Z",
+  "last_attempt_at": "2026-06-06T22:24:52Z",
   "window_started_at": "2026-06-06T00:00:00Z",
   "window_reset_at": null,
   "retry_count": 0,
