@@ -1,0 +1,62 @@
+---
+# pipeline-config: all timeout, retry, and sizing values for pipeline services
+# Source: docs/ai-data-pipeline-error-handling.md §1
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pipeline-config
+  namespace: ai-pipeline
+data:
+  # ── Timeout budget (error-handling doc §1) ───────────────────────────────
+  KAFKA_PRODUCE_TIMEOUT_MS: "5000"
+  MILVUS_CONNECT_TIMEOUT_MS: "3000"
+  MILVUS_SEARCH_TIMEOUT_MS: "10000"
+  REDIS_CONNECT_TIMEOUT_MS: "500"
+  REDIS_OP_TIMEOUT_MS: "200"
+  EMBEDDING_INFERENCE_TIMEOUT_MS: "30000"
+  LLM_REQUEST_TIMEOUT_MS: "60000"
+  QUOTA_GRPC_TIMEOUT_MS: "100"
+
+  # ── Kafka consumer settings (error-handling doc §2.2) ────────────────────
+  KAFKA_MAX_POLL_INTERVAL_MS: "300000"
+  KAFKA_SESSION_TIMEOUT_MS: "45000"
+  KAFKA_BOOTSTRAP: "ai-pipeline-kafka-kafka-bootstrap.infrastructure.svc.cluster.local:9092"
+
+  # ── Connector retry policy (error-handling doc §2.1) ────────────────────
+  CONNECTOR_KAFKA_RETRY_INITIAL_MS: "100"
+  CONNECTOR_KAFKA_RETRY_MAX_MS: "30000"
+  CONNECTOR_KAFKA_RETRY_MAX_ATTEMPTS: "5"
+  CONNECTOR_SOURCE_BACKOFF_CAP_MULTIPLIER: "10"
+
+  # ── Document Processor retry policy (error-handling doc §2.2) ───────────
+  PROCESSOR_FETCH_RETRY_DELAYS_SEC: "1,4,16"
+  PROCESSOR_KAFKA_PUBLISH_RETRY_MAX: "5"
+  PROCESSOR_KAFKA_PUBLISH_RETRY_DELAY_SEC: "1"
+
+  # ── Embedding Worker settings (error-handling doc §2.3) ─────────────────
+  EMBEDDING_BATCH_MAX_CHUNKS: "32"
+  EMBEDDING_BATCH_MAX_WAIT_MS: "500"
+  MILVUS_INSERT_RETRY_MAX: "5"
+  MILVUS_INSERT_RETRY_INITIAL_MS: "2000"
+  MILVUS_INSERT_RETRY_MAX_MS: "60000"
+
+  # ── Circuit breaker settings (error-handling doc §4) ────────────────────
+  CB_MILVUS_RAG_FAILURE_THRESHOLD: "5"
+  CB_MILVUS_RAG_RECOVERY_TIMEOUT_SEC: "30"
+  CB_MILVUS_EMBEDDER_FAILURE_THRESHOLD: "3"
+  CB_MILVUS_EMBEDDER_RECOVERY_TIMEOUT_SEC: "60"
+  CB_EMBEDDING_FAILURE_THRESHOLD: "3"
+  CB_EMBEDDING_RECOVERY_TIMEOUT_SEC: "120"
+  CB_OPENAI_FAILURE_THRESHOLD: "5"
+  CB_OPENAI_RECOVERY_TIMEOUT_SEC: "30"
+
+  # ── RAG API cache (design doc §2.5) ─────────────────────────────────────
+  REDIS_QUERY_CACHE_TTL_SEC: "300"
+  RAG_TOP_K_DEFAULT: "5"
+
+  # ── Chunker settings (implementation plan Phase 1) ───────────────────────
+  CHUNK_SIZE_TOKENS: "512"
+  CHUNK_OVERLAP_TOKENS: "64"
+
+  # ── Keycloak JWKS cache TTL (error-handling doc §2.5) ───────────────────
+  KONG_JWKS_CACHE_TTL_SEC: "60"

@@ -1,0 +1,57 @@
+---
+# KafkaNodePool: single combined broker+controller node (KRaft testbed)
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: combined
+  namespace: infrastructure
+  labels:
+    strimzi.io/cluster: ai-pipeline-kafka
+spec:
+  replicas: 1
+  roles:
+    - controller
+    - broker
+  storage:
+    type: persistent-claim
+    size: 20Gi
+    deleteClaim: false
+  resources:
+    requests:
+      memory: 1Gi
+      cpu: 500m
+    limits:
+      memory: 2Gi
+      cpu: "1"
+---
+# Kafka cluster: single-broker KRaft, Strimzi 1.0.0 / Kafka 4.2.0
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: ai-pipeline-kafka
+  namespace: infrastructure
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: 4.2.0
+    metadataVersion: 4.2-IV0
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+    config:
+      offsets.topic.replication.factor: "1"
+      transaction.state.log.replication.factor: "1"
+      transaction.state.log.min.isr: "1"
+      default.replication.factor: "1"
+      min.insync.replicas: "1"
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}

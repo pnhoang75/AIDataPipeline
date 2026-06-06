@@ -1,0 +1,90 @@
+---
+# raw-documents: 4 partitions, 7-day retention — raw doc events from all connectors
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: raw-documents
+  namespace: infrastructure
+  labels:
+    strimzi.io/cluster: ai-pipeline-kafka
+spec:
+  partitions: 4
+  replicas: 1
+  config:
+    retention.ms: "604800000"   # 7 days
+    segment.bytes: "104857600"  # 100 MiB
+---
+# document-chunks: 8 partitions, 3-day retention — parsed/chunked text for embedding
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: document-chunks
+  namespace: infrastructure
+  labels:
+    strimzi.io/cluster: ai-pipeline-kafka
+spec:
+  partitions: 8
+  replicas: 1
+  config:
+    retention.ms: "259200000"   # 3 days
+    segment.bytes: "104857600"
+---
+# embedding-events: 4 partitions, 1-day retention — completion/error audit trail
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: embedding-events
+  namespace: infrastructure
+  labels:
+    strimzi.io/cluster: ai-pipeline-kafka
+spec:
+  partitions: 4
+  replicas: 1
+  config:
+    retention.ms: "86400000"    # 1 day
+    segment.bytes: "104857600"
+---
+# dlq-raw-documents: 1 partition, 14-day retention — failed raw doc processing
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: dlq-raw-documents
+  namespace: infrastructure
+  labels:
+    strimzi.io/cluster: ai-pipeline-kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: "1209600000"  # 14 days
+    segment.bytes: "104857600"
+---
+# dlq-document-chunks: 1 partition, 14-day retention — failed embedding
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: dlq-document-chunks
+  namespace: infrastructure
+  labels:
+    strimzi.io/cluster: ai-pipeline-kafka
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: "1209600000"  # 14 days
+    segment.bytes: "104857600"
+---
+# metadata-events: 4 partitions, 7-day retention — DataSource/lineage events
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: metadata-events
+  namespace: infrastructure
+  labels:
+    strimzi.io/cluster: ai-pipeline-kafka
+spec:
+  partitions: 4
+  replicas: 1
+  config:
+    retention.ms: "604800000"   # 7 days
+    segment.bytes: "104857600"
