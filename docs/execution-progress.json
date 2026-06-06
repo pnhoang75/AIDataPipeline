@@ -21,5 +21,7 @@
     "1-A",
     "1-A"
   ],
-  "sessions_failed": []
+  "sessions_failed": [
+    "1-B"
+  ]
 }
