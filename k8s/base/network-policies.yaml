@@ -129,6 +129,64 @@ spec:
         - port: 9090
           protocol: TCP
 ---
+# Allow infrastructure pods to reach the Kubernetes API server (needed by CNPG, MinIO, Redis operators).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-k8s-api
+  namespace: infrastructure
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+---
+# Allow intra-namespace communication for operator-managed pods (CNPG replication, MinIO pool, Redis sentinel).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+  namespace: infrastructure
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+# Allow CNPG operator (cnpg-system) to reach PostgreSQL instance pods in infrastructure (port 8000 HTTP status, 5432 PG).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cnpg-operator
+  namespace: infrastructure
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+      ports:
+        - port: 8000
+          protocol: TCP
+        - port: 5432
+          protocol: TCP
+        - port: 5433
+          protocol: TCP
+---
 # Allow monitoring components to egress to ai-pipeline and infrastructure.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -152,3 +210,47 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: monitoring
+---
+# Allow redis-operator (redis-operator ns) to reach Redis/Sentinel pods in infrastructure.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-operator
+  namespace: infrastructure
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: redis-operator
+      ports:
+        - port: 6379
+          protocol: TCP
+        - port: 26379
+          protocol: TCP
+---
+# Allow minio-operator (minio-operator ns) to reach MinIO pods in infrastructure for bucket provisioning.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-minio-operator
+  namespace: infrastructure
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: minio-operator
+      ports:
+        - port: 80
+          protocol: TCP
+        - port: 9000
+          protocol: TCP
+        - port: 9090
+          protocol: TCP

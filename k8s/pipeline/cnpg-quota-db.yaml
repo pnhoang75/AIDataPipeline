@@ -23,7 +23,7 @@ spec:
   backup:
     barmanObjectStore:
       destinationPath: s3://pipeline-backups/cnpg/
-      endpointURL: http://minio.infrastructure.svc:9000
+      endpointURL: http://minio.infrastructure.svc:80
       s3Credentials:
         accessKeyId:
           name: minio-creds
