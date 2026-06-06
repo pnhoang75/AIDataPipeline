@@ -1,0 +1,12 @@
+Session 0-B is complete. All 6 infrastructure operators are installed and running:
+
+| Operator | Namespace | Status |
+|---|---|---|
+| cert-manager v1.14 | cert-manager | 3 pods Running |
+| Strimzi 0.41 | infrastructure | 1 pod Running |
+| CloudNativePG 0.21 | cnpg-system | 1 pod Running |
+| Milvus Operator 0.9 | milvus-operator | 1 pod Running |
+| MinIO Operator 5.0 | minio-operator | 3 pods Running |
+| Redis Operator 3.2 | redis-operator | 1 pod Running |
+
+The done-check (`kubectl get pods -n cnpg-system -l app.kubernetes.io/name=cloudnative-pg`) confirmed the CNPG pod is `Running`. Sentinel `.sessions-done/0-B` created and committed. `execution-progress.json` advanced to session `0-C`.

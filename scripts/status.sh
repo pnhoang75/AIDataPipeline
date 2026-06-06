@@ -23,15 +23,14 @@ echo -e "${BOLD}AI Data Pipeline — Executor Status${RESET}"
 echo -e "${DIM}────────────────────────────────────────${RESET}"
 echo -e "Progress:      ${GREEN}${completed_count}${RESET} / ${total} sessions"
 echo -e "Current:       ${CYAN}${current_session}${RESET} (index ${current_index})"
-echo -e "Status:        $(
-  case $status in
-    running)               echo -e "${CYAN}Running${RESET}" ;;
-    waiting_for_window_reset) echo -e "${YELLOW}Waiting for window reset${RESET}" ;;
-    session_complete)      echo -e "${GREEN}Session complete${RESET}" ;;
-    not_started)           echo -e "${DIM}Not started${RESET}" ;;
-    *)                     echo -e "$status" ;;
-  esac
-)"
+case $status in
+  running)                  status_label="${CYAN}Running${RESET}" ;;
+  waiting_for_window_reset) status_label="${YELLOW}Waiting for window reset${RESET}" ;;
+  session_complete)         status_label="${GREEN}Session complete${RESET}" ;;
+  not_started)              status_label="${DIM}Not started${RESET}" ;;
+  *)                        status_label="$status" ;;
+esac
+echo -e "Status:        ${status_label}"
 [[ "$last_completed" != "null" ]] && echo -e "Last done:     ${last_completed} at ${last_completed_at}"
 [[ "$window_reset_at" != "null" ]] && echo -e "Window resets: ${YELLOW}${window_reset_at}${RESET}"
 [[ "$failed_count" -gt 0 ]] && echo -e "Failed:        ${RED}${failed_count} session(s)${RESET}"

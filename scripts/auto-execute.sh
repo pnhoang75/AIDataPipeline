@@ -19,6 +19,26 @@
 # =============================================================================
 set -euo pipefail
 
+# Ensure claude CLI is findable regardless of how this script is invoked.
+export PATH="/Users/phuonghoang/.local/bin:$PATH"
+
+# macOS does not ship GNU timeout. Provide a compatible wrapper if missing.
+if ! command -v timeout &>/dev/null; then
+  timeout() {
+    local secs="$1"; shift
+    "$@" &
+    local pid=$!
+    # Redirect killer away from the pipeline so it doesn't hold the write-end open.
+    (sleep "$secs" && kill "$pid" 2>/dev/null) </dev/null >/dev/null 2>&1 &
+    local killer=$!
+    wait "$pid" 2>/dev/null
+    local rc=$?
+    kill "$killer" 2>/dev/null
+    wait "$killer" 2>/dev/null
+    return $rc
+  }
+fi
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSIONS_FILE="$REPO_ROOT/docs/sessions.json"
