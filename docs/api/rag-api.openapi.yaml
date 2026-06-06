@@ -1,0 +1,620 @@
+openapi: 3.1.0
+
+info:
+  title: AI Data Pipeline — RAG API
+  version: 1.0.0
+  description: |
+    Vector search and retrieval-augmented generation endpoint.
+    All requests must carry a valid Keycloak-issued JWT in the
+    `Authorization: Bearer` header. Kong validates the token and
+    injects `X-Tenant-ID` before forwarding to this service.
+
+servers:
+  - url: https://api.pipeline.local/v1
+    description: kind testbed (self-signed TLS)
+  - url: https://api.pipeline.acme.com/v1
+    description: production
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: query
+    description: Vector search and RAG generation
+  - name: admin
+    description: Collection and health management
+
+# ─────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────
+paths:
+
+  /query:
+    post:
+      tags: [query]
+      operationId: query
+      summary: Vector search with optional LLM generation
+      description: |
+        Embeds the query text, performs approximate nearest-neighbour search
+        in the caller's Milvus collection, and returns the top-K matching
+        chunks. When `generate: true` the chunks are forwarded to the
+        configured LLM and an answer is synthesised.
+
+        **Quota:** each call consumes 1 unit of `api_calls_per_day`.
+        A `429` is returned when the tenant is over limit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+            examples:
+              simple:
+                summary: Simple keyword query
+                value:
+                  query: "What is the refund policy for enterprise customers?"
+                  top_k: 5
+              filtered:
+                summary: Filter by source type
+                value:
+                  query: "Q4 revenue forecast"
+                  top_k: 3
+                  source_filter: s3
+                  include_metadata: true
+              generate:
+                summary: Full RAG with generation
+                value:
+                  query: "Summarise the board deck from December 2024"
+                  top_k: 8
+                  generate: true
+                  llm_model: "gpt-4o-mini"
+      responses:
+        '200':
+          description: Successful search result
+          headers:
+            X-Request-ID:
+              schema: {type: string, format: uuid}
+            X-Cache:
+              schema: {type: string, enum: [HIT, MISS]}
+            X-Latency-Ms:
+              schema: {type: integer}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/CollectionNotFound'
+        '429':
+          $ref: '#/components/responses/QuotaExceeded'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /query/stream:
+    post:
+      tags: [query]
+      operationId: queryStream
+      summary: Streaming RAG response (Server-Sent Events)
+      description: |
+        Identical to `POST /query` with `generate: true`, but the LLM
+        token stream is returned as SSE (`text/event-stream`). Each event
+        carries a `QueryStreamChunk`. A final `[DONE]` event signals
+        completion.
+
+        **Note:** caching is disabled for streaming responses.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '200':
+          description: SSE stream of generated tokens
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/QueryStreamChunk'
+              example: |
+                data: {"type":"retrieval","results":[...],"request_id":"uuid"}
+
+                data: {"type":"token","delta":"The refund policy"}
+
+                data: {"type":"token","delta":" allows 30 days..."}
+
+                data: {"type":"done","latency_ms":843}
+
+                data: [DONE]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/QuotaExceeded'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /health:
+    get:
+      tags: [admin]
+      operationId: health
+      summary: Service health check
+      description: Returns liveness and dependency status. Used by K8s liveness/readiness probes and the admin dashboard.
+      security: []   # no auth required for health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: One or more dependencies are unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /collections:
+    get:
+      tags: [admin]
+      operationId: listCollections
+      summary: List Milvus collections visible to the caller
+      description: |
+        Admins see all tenant collections.
+        Regular users see only their own tenant's collection(s).
+      parameters:
+        - name: include_stats
+          in: query
+          schema: {type: boolean, default: false}
+          description: Include vector count and index type per collection
+      responses:
+        '200':
+          description: List of collections
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectionsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /collections/{collection_name}/reindex:
+    post:
+      tags: [admin]
+      operationId: reindexCollection
+      summary: Trigger full re-index of a collection
+      description: |
+        Drops the existing HNSW/IVF index and rebuilds it. Required after
+        changing `EmbeddingConfig.dimension`. Requires `pipeline-admin` role.
+      parameters:
+        - name: collection_name
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '202':
+          description: Re-index job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/CollectionNotFound'
+
+# ─────────────────────────────────────────────
+# Components
+# ─────────────────────────────────────────────
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Keycloak-issued access token (RS256). Kong validates before forwarding.
+
+  # ── Request schemas ──────────────────────────
+  schemas:
+
+    QueryRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Natural-language query text to embed and search
+          example: "What is the refund policy for enterprise customers?"
+        top_k:
+          type: integer
+          default: 5
+          minimum: 1
+          maximum: 50
+          description: Number of nearest-neighbour chunks to return
+        source_filter:
+          type: string
+          enum: [s3, nfs, database, stream]
+          description: Restrict search to chunks from a single source type
+        collection:
+          type: string
+          description: |
+            Override the default tenant collection.
+            Regular users may only specify their own tenant collection.
+            Admins may specify any collection.
+        include_metadata:
+          type: boolean
+          default: true
+          description: Whether to include chunk metadata in results
+        min_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          default: 0.0
+          description: Minimum similarity score threshold (0 = no filter)
+        generate:
+          type: boolean
+          default: false
+          description: Pass retrieved chunks to LLM and return a synthesised answer
+        llm_model:
+          type: string
+          default: "gpt-4o-mini"
+          description: LLM model identifier (only used when generate=true)
+          example: "gpt-4o-mini"
+
+    # ── Response schemas ──────────────────────
+
+    QueryResponse:
+      type: object
+      required: [results, latency_ms, collection, cached, request_id]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryResult'
+        latency_ms:
+          type: integer
+          description: Total server-side latency in milliseconds
+        collection:
+          type: string
+          description: Milvus collection searched
+        cached:
+          type: boolean
+          description: True if result was served from Redis cache
+        answer:
+          type: string
+          description: LLM-synthesised answer (only present when generate=true)
+        usage:
+          $ref: '#/components/schemas/LLMUsage'
+
+    QueryResult:
+      type: object
+      required: [chunk_id, doc_id, text, score, source_type]
+      properties:
+        chunk_id:
+          type: string
+          example: "sha256abc:3"
+        doc_id:
+          type: string
+          example: "sha256abc"
+        text:
+          type: string
+          description: Raw chunk text
+        score:
+          type: number
+          format: float
+          description: Cosine similarity score (0–1, higher = more relevant)
+          example: 0.847
+        source_type:
+          type: string
+          enum: [s3, nfs, database, stream]
+        source_id:
+          type: string
+          description: Original source path / object key / table row / topic offset
+        chunk_index:
+          type: integer
+          description: Position of this chunk within the source document
+        total_chunks:
+          type: integer
+          description: Total chunks the source document was split into
+        metadata:
+          $ref: '#/components/schemas/ChunkMetadata'
+
+    ChunkMetadata:
+      type: object
+      properties:
+        title:
+          type: string
+        author:
+          type: string
+        page:
+          type: integer
+        tags:
+          type: array
+          items: {type: string}
+        created_at:
+          type: integer
+          description: Unix timestamp of original document ingestion
+      additionalProperties: true
+
+    QueryStreamChunk:
+      type: object
+      required: [type]
+      discriminator:
+        propertyName: type
+      properties:
+        type:
+          type: string
+          enum: [retrieval, token, done]
+      oneOf:
+        - $ref: '#/components/schemas/StreamRetrieval'
+        - $ref: '#/components/schemas/StreamToken'
+        - $ref: '#/components/schemas/StreamDone'
+
+    StreamRetrieval:
+      allOf:
+        - $ref: '#/components/schemas/QueryStreamChunk'
+        - type: object
+          properties:
+            results:
+              type: array
+              items:
+                $ref: '#/components/schemas/QueryResult'
+            request_id:
+              type: string
+              format: uuid
+
+    StreamToken:
+      allOf:
+        - $ref: '#/components/schemas/QueryStreamChunk'
+        - type: object
+          required: [delta]
+          properties:
+            delta:
+              type: string
+              description: Next generated token or word fragment
+
+    StreamDone:
+      allOf:
+        - $ref: '#/components/schemas/QueryStreamChunk'
+        - type: object
+          properties:
+            latency_ms:
+              type: integer
+            usage:
+              $ref: '#/components/schemas/LLMUsage'
+
+    LLMUsage:
+      type: object
+      properties:
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        model:
+          type: string
+
+    HealthResponse:
+      type: object
+      required: [status, version, checks]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        version:
+          type: string
+          example: "1.3.0"
+        embedding_backend:
+          type: string
+          example: "local-cpu"
+        embedding_model:
+          type: string
+          example: "BAAI/bge-small-en-v1.5"
+        checks:
+          type: object
+          properties:
+            milvus:
+              $ref: '#/components/schemas/DependencyCheck'
+            redis:
+              $ref: '#/components/schemas/DependencyCheck'
+            kafka:
+              $ref: '#/components/schemas/DependencyCheck'
+
+    DependencyCheck:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        latency_ms:
+          type: integer
+        error:
+          type: string
+
+    CollectionsResponse:
+      type: object
+      required: [collections]
+      properties:
+        collections:
+          type: array
+          items:
+            $ref: '#/components/schemas/Collection'
+
+    Collection:
+      type: object
+      required: [name, tenant_id]
+      properties:
+        name:
+          type: string
+          example: "acme_docs"
+        tenant_id:
+          type: string
+          format: uuid
+        vector_count:
+          type: integer
+          description: Present when include_stats=true
+        dimension:
+          type: integer
+          example: 384
+        index_type:
+          type: string
+          enum: [IVF_FLAT, HNSW]
+        created_at:
+          type: string
+          format: date-time
+
+    JobAccepted:
+      type: object
+      required: [job_id, status]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [accepted]
+        message:
+          type: string
+          example: "Re-index started for collection acme_docs"
+
+    # ── Error schema ──────────────────────────
+
+    Error:
+      type: object
+      required: [error, message, request_id]
+      properties:
+        error:
+          type: string
+          enum:
+            - INVALID_REQUEST
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - COLLECTION_NOT_FOUND
+            - QUOTA_EXCEEDED
+            - EMBEDDING_ERROR
+            - MILVUS_UNAVAILABLE
+            - LLM_ERROR
+            - INTERNAL_ERROR
+        message:
+          type: string
+          description: Human-readable error message
+          example: "Query text must not be empty"
+        detail:
+          type: object
+          description: Structured detail (field errors, quota info, etc.)
+          additionalProperties: true
+        request_id:
+          type: string
+          format: uuid
+        retry_after:
+          type: integer
+          description: Seconds until quota resets (only present on 429)
+
+  # ── Reusable responses ────────────────────
+  responses:
+
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: INVALID_REQUEST
+            message: "'top_k' must be between 1 and 50"
+            detail: {field: top_k, value: 99, max: 50}
+            request_id: "550e8400-e29b-41d4-a716-446655440000"
+
+    Unauthorized:
+      description: Missing or invalid JWT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: UNAUTHORIZED
+            message: "Bearer token is missing or expired"
+            request_id: "550e8400-e29b-41d4-a716-446655440000"
+
+    Forbidden:
+      description: Authenticated but insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: FORBIDDEN
+            message: "Role 'pipeline-admin' required for this operation"
+            request_id: "550e8400-e29b-41d4-a716-446655440000"
+
+    CollectionNotFound:
+      description: Milvus collection does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: COLLECTION_NOT_FOUND
+            message: "Collection 'acme_docs' not found"
+            request_id: "550e8400-e29b-41d4-a716-446655440000"
+
+    QuotaExceeded:
+      description: Tenant quota exceeded
+      headers:
+        Retry-After:
+          schema: {type: integer}
+          description: Seconds until the quota window resets
+        X-Quota-Limit:
+          schema: {type: integer}
+        X-Quota-Remaining:
+          schema: {type: integer}
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: QUOTA_EXCEEDED
+            message: "Daily API call quota of 10000 reached"
+            detail: {metric: api_calls_per_day, limit: 10000, current: 10001, resets_at: "2026-06-06T00:00:00Z"}
+            retry_after: 38400
+            request_id: "550e8400-e29b-41d4-a716-446655440000"
+
+    ServiceUnavailable:
+      description: A required backend (Milvus, embedding model) is unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: MILVUS_UNAVAILABLE
+            message: "Milvus is not reachable — retrying"
+            request_id: "550e8400-e29b-41d4-a716-446655440000"
+
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: INTERNAL_ERROR
+            message: "An unexpected error occurred"
+            request_id: "550e8400-e29b-41d4-a716-446655440000"

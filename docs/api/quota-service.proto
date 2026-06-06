@@ -1,0 +1,328 @@
+// quota_service.proto
+// gRPC API for the AI Pipeline Quota Service.
+// Compile: protoc --python_out=. --grpc_python_out=. quota_service.proto
+//
+// Clients: Kong (pre-check), RAG API (record), BFF (usage queries),
+//          Embedding Worker (record GPU seconds), Pipeline Operator (register tenant).
+
+syntax = "proto3";
+
+package quota.v1;
+
+option go_package    = "github.com/pnhoang75/ai-data-pipeline/gen/quota/v1";
+option java_package  = "io.pipeline.quota.v1";
+option python_module = "quota_service_pb2";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// ─────────────────────────────────────────────────────────────────
+// Service
+// ─────────────────────────────────────────────────────────────────
+
+service QuotaService {
+
+  // Pre-request check — called by Kong before forwarding.
+  // Fast path: Redis INCR. Returns in < 5 ms p99.
+  rpc CheckQuota(CheckQuotaRequest) returns (CheckQuotaResponse);
+
+  // Record actual usage after work completes.
+  // Called by Embedding Worker, RAG API, Connectors.
+  // Idempotent when the same event_id is sent twice (TTL dedup key).
+  rpc RecordUsage(RecordUsageRequest) returns (RecordUsageResponse);
+
+  // Batch record — reduces gRPC round trips for high-throughput workers.
+  rpc RecordUsageBatch(RecordUsageBatchRequest) returns (RecordUsageBatchResponse);
+
+  // Current usage snapshot for a tenant + metric (used by BFF dashboard).
+  rpc GetUsage(GetUsageRequest) returns (GetUsageResponse);
+
+  // List usage across all tenants for a given metric and window.
+  // Paginated. Admin-only (enforced by Kong plugin, not this service).
+  rpc ListUsage(ListUsageRequest) returns (ListUsageResponse);
+
+  // Resolve the effective limit for a tenant + metric
+  // (license tier → quota_overrides → result).
+  rpc GetLimit(GetLimitRequest) returns (GetLimitResponse);
+
+  // Register a new tenant with its license tier.
+  // Called by Pipeline Operator during TenantWorkspace reconcile.
+  rpc RegisterTenant(RegisterTenantRequest) returns (RegisterTenantResponse);
+
+  // Update a tenant's license tier. Old limits are cleared; new limits applied.
+  rpc UpdateTenantLicense(UpdateTenantLicenseRequest) returns (UpdateTenantLicenseResponse);
+
+  // Deregister a tenant (delete quota records + Redis keys).
+  // Called by Pipeline Operator on TenantWorkspace deletion.
+  rpc DeregisterTenant(DeregisterTenantRequest) returns (DeregisterTenantResponse);
+
+  // Override a limit for a specific tenant + metric.
+  // Admin-only. BFF calls this from PUT /api/admin/quota/{tenant}/{metric}.
+  rpc SetQuotaOverride(SetQuotaOverrideRequest) returns (SetQuotaOverrideResponse);
+
+  // Remove a quota override — reverts to license-tier default.
+  rpc RemoveQuotaOverride(RemoveQuotaOverrideRequest) returns (RemoveQuotaOverrideResponse);
+
+  // Health check (used by K8s readiness probe via grpc-health-checking protocol).
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────
+
+enum Metric {
+  METRIC_UNSPECIFIED          = 0;
+  BYTES_PER_MONTH             = 1;  // bytes ingested; window=calendar month
+  VECTORS_STORED              = 2;  // total vectors in Milvus; window=absolute
+  API_CALLS_PER_DAY           = 3;  // RAG API queries; window=UTC calendar day
+  API_CALLS_PER_MINUTE        = 4;  // rate limit; window=sliding 60 s
+  GPU_SECONDS_PER_MONTH       = 5;  // embedding GPU compute; window=calendar month
+  CONCURRENT_WORKERS          = 6;  // max embedding worker replicas; absolute
+  CONNECTOR_COUNT             = 7;  // max active DataConnectors; absolute
+  USERS_PER_TENANT            = 8;  // Keycloak org members; absolute
+}
+
+enum LicenseTier {
+  LICENSE_TIER_UNSPECIFIED = 0;
+  FREE                     = 1;
+  PRO                      = 2;
+  ENTERPRISE               = 3;
+}
+
+enum QuotaStatus {
+  QUOTA_STATUS_UNSPECIFIED = 0;
+  ALLOWED                  = 1;  // within limit
+  DENIED                   = 2;  // over limit
+  UNLIMITED                = 3;  // NULL limit (enterprise)
+}
+
+enum WindowType {
+  WINDOW_UNSPECIFIED = 0;
+  CALENDAR_MONTH     = 1;  // resets 1st of each month UTC
+  CALENDAR_DAY       = 2;  // resets 00:00 UTC daily
+  SLIDING_MINUTE     = 3;  // rolling 60-second window
+  ABSOLUTE           = 4;  // no window; cumulative count
+}
+
+// ─────────────────────────────────────────────────────────────────
+// CheckQuota
+// ─────────────────────────────────────────────────────────────────
+
+message CheckQuotaRequest {
+  string tenant_id = 1;   // Keycloak org slug (e.g. "acme")
+  Metric metric    = 2;
+  int64  amount    = 3;   // how much this request will consume (usually 1)
+
+  // Optional: if true, increment the counter on a ALLOWED response (atomic check-and-increment).
+  // If false, only check — caller must call RecordUsage separately.
+  // Default: true (most callers want atomic check-and-increment).
+  bool increment_on_allow = 4;
+}
+
+message CheckQuotaResponse {
+  QuotaStatus status       = 1;
+  int64  current_usage     = 2;   // usage AFTER potential increment
+  int64  limit             = 3;   // 0 = unlimited (ENTERPRISE)
+  string deny_reason       = 4;   // human-readable, only set when status=DENIED
+  int64  retry_after_secs  = 5;   // seconds until window resets; only when DENIED
+  string window_resets_at  = 6;   // ISO 8601 timestamp
+}
+
+// ─────────────────────────────────────────────────────────────────
+// RecordUsage
+// ─────────────────────────────────────────────────────────────────
+
+message RecordUsageRequest {
+  string   tenant_id = 1;
+  Metric   metric    = 2;
+  int64    amount    = 3;
+
+  // Idempotency key — if the same event_id arrives twice within 24h,
+  // the second call is a no-op. Use a UUID generated per logical event.
+  string   event_id  = 4;
+
+  // Optional metadata stored in the usage_history table for auditing.
+  map<string, string> labels = 5;  // e.g. {"source_type": "s3", "backend": "local-cpu"}
+}
+
+message RecordUsageResponse {
+  int64 new_total = 1;   // current counter value after recording
+  bool  deduped   = 2;   // true if this event_id was already recorded
+}
+
+message RecordUsageBatchRequest {
+  repeated RecordUsageRequest events = 1;
+}
+
+message RecordUsageBatchResponse {
+  repeated RecordUsageResponse results = 1;
+  int32 succeeded = 2;
+  int32 failed    = 3;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// GetUsage
+// ─────────────────────────────────────────────────────────────────
+
+message GetUsageRequest {
+  string tenant_id = 1;
+  Metric metric    = 2;
+  string window    = 3;  // "2026-06" for monthly, "2026-06-05" for daily, "" for current
+}
+
+message GetUsageResponse {
+  string      tenant_id    = 1;
+  Metric      metric       = 2;
+  int64       current      = 3;
+  int64       limit        = 4;  // 0 = unlimited
+  float       usage_ratio  = 5;  // 0.0–1.0; >1.0 if over limit
+  bool        overridden   = 6;  // true if a quota override is active
+  WindowType  window_type  = 7;
+  string      window_label = 8;  // e.g. "2026-06"
+  string      resets_at    = 9;  // ISO 8601; empty for ABSOLUTE metrics
+}
+
+// ─────────────────────────────────────────────────────────────────
+// ListUsage
+// ─────────────────────────────────────────────────────────────────
+
+message ListUsageRequest {
+  Metric metric     = 1;
+  string window     = 2;   // "" = current window
+  int32  page       = 3;   // 1-based
+  int32  page_size  = 4;   // default 20, max 100
+  string sort_by    = 5;   // "usage_ratio" (default) | "current" | "tenant_id"
+  bool   desc       = 6;   // default true
+}
+
+message ListUsageResponse {
+  repeated TenantUsage items  = 1;
+  int32 total                 = 2;
+  int32 page                  = 3;
+  int32 total_pages           = 4;
+}
+
+message TenantUsage {
+  string        tenant_id    = 1;
+  string        tenant_name  = 2;
+  LicenseTier   license_tier = 3;
+  GetUsageResponse usage     = 4;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// GetLimit / Override
+// ─────────────────────────────────────────────────────────────────
+
+message GetLimitRequest {
+  string tenant_id = 1;
+  Metric metric    = 2;
+}
+
+message GetLimitResponse {
+  int64       limit          = 1;   // effective limit (override > tier default); 0 = unlimited
+  LicenseTier tier           = 2;
+  int64       tier_default   = 3;   // limit from the license tier definition
+  bool        overridden     = 4;
+  int64       override_value = 5;
+  string      override_note  = 6;
+  string      override_set_by = 7;
+  google.protobuf.Timestamp override_set_at = 8;
+}
+
+message SetQuotaOverrideRequest {
+  string tenant_id     = 1;
+  Metric metric        = 2;
+  int64  limit         = 3;   // 0 = block entirely; use RemoveQuotaOverride to restore tier default
+  string note          = 4;
+  string set_by        = 5;   // Keycloak sub of the admin making the change
+}
+
+message SetQuotaOverrideResponse {
+  GetLimitResponse effective_limit = 1;
+}
+
+message RemoveQuotaOverrideRequest {
+  string tenant_id = 1;
+  Metric metric    = 2;
+}
+
+message RemoveQuotaOverrideResponse {
+  GetLimitResponse effective_limit = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Tenant lifecycle
+// ─────────────────────────────────────────────────────────────────
+
+message RegisterTenantRequest {
+  string      tenant_id    = 1;
+  string      tenant_name  = 2;
+  LicenseTier license_tier = 3;
+  // Optional: pre-set custom limits at registration time
+  map<string, int64> custom_limits = 4;  // Metric name → limit
+}
+
+message RegisterTenantResponse {
+  string tenant_id                   = 1;
+  repeated GetLimitResponse limits   = 2;  // effective limits for all metrics
+}
+
+message UpdateTenantLicenseRequest {
+  string      tenant_id    = 1;
+  LicenseTier license_tier = 2;
+  // When true, also clear all existing quota overrides (start fresh from new tier defaults).
+  bool clear_overrides     = 3;
+}
+
+message UpdateTenantLicenseResponse {
+  repeated GetLimitResponse limits = 1;
+}
+
+message DeregisterTenantRequest {
+  string tenant_id = 1;
+}
+
+message DeregisterTenantResponse {
+  bool success = 1;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Health
+// ─────────────────────────────────────────────────────────────────
+
+message HealthCheckRequest {
+  string service = 1;  // "" = overall health
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN     = 0;
+    SERVING     = 1;
+    NOT_SERVING = 2;
+  }
+  ServingStatus status = 1;
+  map<string, string> details = 2;  // e.g. {"redis": "ok", "postgres": "ok"}
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Error details (returned in gRPC Status.details)
+// ─────────────────────────────────────────────────────────────────
+
+message QuotaExceededDetail {
+  string tenant_id        = 1;
+  Metric metric           = 2;
+  int64  current_usage    = 3;
+  int64  limit            = 4;
+  string window_resets_at = 5;
+  int64  retry_after_secs = 6;
+}
+
+// gRPC status codes used by this service:
+//   OK              (0)  — success
+//   INVALID_ARGUMENT (3) — missing/invalid field
+//   NOT_FOUND       (5)  — tenant not registered
+//   ALREADY_EXISTS  (6)  — RegisterTenant called for existing tenant
+//   RESOURCE_EXHAUSTED (8) — quota exceeded (CheckQuota with increment_on_allow=true)
+//   INTERNAL        (13) — Redis/PostgreSQL error
+//   UNAVAILABLE     (14) — service starting up or dependency down

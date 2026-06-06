@@ -1,0 +1,715 @@
+# Pipeline Operator — Custom Resource Definitions
+# Group: ai-pipeline.io / Version: v1alpha1
+# Install: kubectl apply -f pipeline-operator-crds.yaml
+# These are the full OpenAPI v3 validation schemas embedded in the CRD spec.
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# PipelineCluster — cluster-scoped, one per deployment
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: pipelineclusters.ai-pipeline.io
+  annotations:
+    ai-pipeline.io/description: >
+      Top-level resource representing the entire AI pipeline deployment.
+      Bumping spec.version triggers the coordinated 7-step upgrade sequence.
+spec:
+  group: ai-pipeline.io
+  scope: Cluster
+  names:
+    kind: PipelineCluster
+    plural: pipelineclusters
+    singular: pipelinecluster
+    shortNames: [pc]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Version
+          type: string
+          jsonPath: .spec.version
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+
+            spec:
+              type: object
+              required: [version, kafkaBootstrap, milvusHost]
+              properties:
+
+                version:
+                  type: string
+                  pattern: '^\d+\.\d+\.\d+$'
+                  description: >
+                    Semver version of all pipeline worker images.
+                    Changing this triggers the coordinated upgrade sequence.
+                  example: "1.4.0"
+
+                kafkaBootstrap:
+                  type: string
+                  description: Kafka bootstrap server address (host:port)
+                  example: "ai-pipeline-kafka-kafka-bootstrap.infrastructure.svc:9093"
+
+                milvusHost:
+                  type: string
+                  description: Milvus gRPC host
+                  example: "milvus.infrastructure.svc"
+
+                milvusPort:
+                  type: integer
+                  default: 19530
+                  minimum: 1
+                  maximum: 65535
+
+                embeddingBackend:
+                  type: string
+                  enum: [local-cpu, local-gpu, openai]
+                  default: local-cpu
+                  description: Default embedding backend for new EmbeddingConfig resources
+
+                upgradeStrategy:
+                  type: string
+                  enum: [rolling, blue-green]
+                  default: rolling
+                  description: >
+                    rolling: drain → roll each component in sequence.
+                    blue-green: not yet implemented (reserved).
+
+                upgradeTimeoutMinutes:
+                  type: integer
+                  default: 30
+                  minimum: 5
+                  maximum: 120
+                  description: >
+                    Maximum wall-clock time for the full upgrade sequence.
+                    If exceeded, operator marks upgrade as Failed and fires alert.
+
+                paused:
+                  type: boolean
+                  default: false
+                  description: >
+                    When true, the operator stops reconciling all child resources.
+                    Useful for emergency maintenance.
+
+            status:
+              type: object
+              properties:
+
+                phase:
+                  type: string
+                  enum: [Initializing, Ready, Upgrading, Degraded, Failed, Paused]
+                  description: Current lifecycle phase of the pipeline
+
+                observedVersion:
+                  type: string
+                  description: The last successfully deployed version
+
+                upgradeStartedAt:
+                  type: string
+                  format: date-time
+
+                upgradeStep:
+                  type: integer
+                  minimum: 1
+                  maximum: 7
+                  description: Current step in the upgrade sequence (1–7)
+
+                connectorCount:
+                  type: integer
+
+                tenantWorkspaceCount:
+                  type: integer
+
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                        enum:
+                          - Ready
+                          - UpgradeInProgress
+                          - DegradedConnector
+                          - MilvusUnreachable
+                          - KafkaUnreachable
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+
+                lastReconciled:
+                  type: string
+                  format: date-time
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# DataConnector — namespace-scoped, one per source
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: dataconnectors.ai-pipeline.io
+  annotations:
+    ai-pipeline.io/description: >
+      Declares a source connector. The operator creates the corresponding
+      K8s Deployment (event-driven) or CronJob (poll-based), a Strimzi
+      KafkaTopic CR, and a KafkaUser CR with produce-only ACLs.
+spec:
+  group: ai-pipeline.io
+  scope: Namespaced
+  names:
+    kind: DataConnector
+    plural: dataconnectors
+    singular: dataconnector
+    shortNames: [dc]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Source
+          type: string
+          jsonPath: .spec.sourceType
+        - name: Tenant
+          type: string
+          jsonPath: .spec.tenantId
+        - name: State
+          type: string
+          jsonPath: .status.state
+        - name: Docs
+          type: integer
+          jsonPath: .status.docsIngested
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+
+            spec:
+              type: object
+              required: [sourceType, tenantId, endpoint]
+              properties:
+
+                sourceType:
+                  type: string
+                  enum: [s3, nfs, database, stream]
+                  description: Type of data source
+
+                tenantId:
+                  type: string
+                  pattern: '^[a-z0-9-]+$'
+                  maxLength: 63
+                  description: >
+                    Tenant slug (matches Keycloak org name and Milvus collection prefix)
+
+                endpoint:
+                  type: string
+                  minLength: 1
+                  description: >
+                    Source-type-specific endpoint.
+                    s3: s3://bucket/prefix
+                    nfs: /mnt/nfs/path
+                    database: postgresql://host:5432/db?schema=public
+                    stream: topic-name-prefix
+                  example: "s3://acme-reports/2024-Q4/"
+
+                pollInterval:
+                  type: string
+                  pattern: '^\d+[smh]$'
+                  description: >
+                    Poll frequency (e.g. 30s, 5m, 1h).
+                    When absent, connector runs as a long-running Deployment
+                    (event-driven via inotify or bucket notifications).
+                  example: "5m"
+
+                fileTypes:
+                  type: array
+                  items:
+                    type: string
+                    enum: [pdf, docx, doc, txt, html, csv, json, md]
+                  default: [pdf, docx, txt]
+                  description: >
+                    File extensions to process. Files with other extensions are
+                    ignored silently.
+
+                secretRef:
+                  type: string
+                  description: >
+                    Name of a K8s Secret in the same namespace containing
+                    source credentials. Mounted at /etc/connector/secrets.
+
+                batchSize:
+                  type: integer
+                  default: 10
+                  minimum: 1
+                  maximum: 500
+                  description: Maximum number of documents to publish per poll cycle
+
+                maxFileSizeMB:
+                  type: integer
+                  default: 100
+                  minimum: 1
+                  maximum: 2048
+                  description: >
+                    Files larger than this are skipped with a warning.
+                    Prevents OOM in the document processor.
+
+                paused:
+                  type: boolean
+                  default: false
+                  description: Suspend the connector without deleting it
+
+                resources:
+                  type: object
+                  description: K8s resource requests/limits for the connector pod
+                  properties:
+                    requests:
+                      type: object
+                      properties:
+                        cpu:    {type: string, default: "100m"}
+                        memory: {type: string, default: "256Mi"}
+                    limits:
+                      type: object
+                      properties:
+                        cpu:    {type: string, default: "500m"}
+                        memory: {type: string, default: "512Mi"}
+
+            status:
+              type: object
+              properties:
+
+                state:
+                  type: string
+                  enum: [Pending, Running, Degraded, Paused, Error]
+
+                workloadKind:
+                  type: string
+                  enum: [Deployment, CronJob]
+
+                workloadName:
+                  type: string
+
+                kafkaTopicName:
+                  type: string
+
+                kafkaUserName:
+                  type: string
+
+                docsIngested:
+                  type: integer
+
+                lastRunAt:
+                  type: string
+                  format: date-time
+
+                lastError:
+                  type: string
+
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                        enum: [Ready, KafkaTopicReady, KafkaUserReady, WorkloadReady]
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:     {type: string}
+                      message:    {type: string}
+                      lastTransitionTime: {type: string, format: date-time}
+
+                lastReconciled:
+                  type: string
+                  format: date-time
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# EmbeddingConfig — namespace-scoped, one active at a time
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: embeddingconfigs.ai-pipeline.io
+  annotations:
+    ai-pipeline.io/description: >
+      Configures the embedding backend, model, and batching parameters.
+      On change, the operator patches the pipeline-config ConfigMap and
+      triggers a rolling restart of embedding worker pods.
+      Changing `dimension` is blocked until `reindexConfirmed: true` is set.
+spec:
+  group: ai-pipeline.io
+  scope: Namespaced
+  names:
+    kind: EmbeddingConfig
+    plural: embeddingconfigs
+    singular: embeddingconfig
+    shortNames: [ec]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Backend
+          type: string
+          jsonPath: .spec.backend
+        - name: Model
+          type: string
+          jsonPath: .spec.model
+        - name: Dim
+          type: integer
+          jsonPath: .spec.dimension
+        - name: State
+          type: string
+          jsonPath: .status.state
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+
+            spec:
+              type: object
+              required: [backend, model, dimension]
+              properties:
+
+                backend:
+                  type: string
+                  enum: [local-cpu, local-gpu, openai]
+                  description: Embedding computation backend
+
+                model:
+                  type: string
+                  description: >
+                    HuggingFace model identifier or OpenAI model name.
+                    Must match the vector dimension specified in `dimension`.
+                  example: "BAAI/bge-small-en-v1.5"
+
+                dimension:
+                  type: integer
+                  enum: [384, 768, 1024, 1536, 3072]
+                  description: >
+                    Output vector dimension. Must match the Milvus collection schema.
+                    Changing this field is blocked until reindexConfirmed is true.
+
+                device:
+                  type: string
+                  enum: [cpu, cuda, mps]
+                  default: cpu
+                  description: >
+                    Torch device. 'mps' for Apple Silicon (local dev only).
+                    Ignored when backend=openai.
+
+                batchSize:
+                  type: integer
+                  default: 32
+                  minimum: 1
+                  maximum: 256
+                  description: Maximum chunks per embed_batch() call
+
+                batchTimeoutMs:
+                  type: integer
+                  default: 500
+                  minimum: 50
+                  maximum: 5000
+                  description: >
+                    Maximum wait time before flushing a partial batch.
+                    Lower values reduce latency; higher values improve throughput.
+
+                workerReplicas:
+                  type: integer
+                  default: 2
+                  minimum: 1
+                  maximum: 16
+                  description: Number of embedding worker pod replicas
+
+                maxConcurrentBatches:
+                  type: integer
+                  default: 1
+                  minimum: 1
+                  maximum: 8
+                  description: >
+                    Concurrent embed_batch() calls per worker replica.
+                    Set >1 only for GPU backends with sufficient VRAM.
+
+                openaiApiKeySecretRef:
+                  type: object
+                  description: Required when backend=openai
+                  properties:
+                    name: {type: string}
+                    key:  {type: string}
+                  required: [name, key]
+
+                reindexConfirmed:
+                  type: boolean
+                  default: false
+                  description: >
+                    Must be set to true by an admin before a dimension change
+                    is applied. The operator clears this field after completing
+                    the transition. This prevents accidental collection corruption.
+
+            status:
+              type: object
+              properties:
+
+                state:
+                  type: string
+                  enum: [Pending, Applied, BlockedDimensionChange, Reindexing, Error]
+
+                activeDimension:
+                  type: integer
+                  description: Dimension currently in use (may differ from spec during transition)
+
+                activeModel:
+                  type: string
+
+                activeBackend:
+                  type: string
+
+                workerRolloutStatus:
+                  type: string
+                  description: e.g. "2/2 updated"
+
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                        enum: [Applied, DimensionChangePending, WorkerRolling]
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:     {type: string}
+                      message:    {type: string}
+                      lastTransitionTime: {type: string, format: date-time}
+
+                lastReconciled:
+                  type: string
+                  format: date-time
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# TenantWorkspace — namespace-scoped, one per tenant
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: tenantworkspaces.ai-pipeline.io
+  annotations:
+    ai-pipeline.io/description: >
+      Provisions all per-tenant resources: Milvus collection, Kafka ACLs,
+      K8s namespace + ResourceQuota (Enterprise), and Quota Service registration.
+      Deleting this resource tears down all tenant resources.
+spec:
+  group: ai-pipeline.io
+  scope: Namespaced
+  names:
+    kind: TenantWorkspace
+    plural: tenantworkspaces
+    singular: tenantworkspace
+    shortNames: [tw]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Tenant
+          type: string
+          jsonPath: .spec.tenantId
+        - name: License
+          type: string
+          jsonPath: .spec.licenseRef
+        - name: Collection
+          type: string
+          jsonPath: .spec.milvusCollection
+        - name: State
+          type: string
+          jsonPath: .status.state
+        - name: Vectors
+          type: integer
+          jsonPath: .status.vectorCount
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+
+            spec:
+              type: object
+              required: [tenantId, licenseRef, milvusCollection, vectorDimension]
+              properties:
+
+                tenantId:
+                  type: string
+                  pattern: '^[a-z0-9-]+$'
+                  maxLength: 63
+                  description: >
+                    Tenant slug. Must match the Keycloak Organization name and
+                    the prefix used for Kafka ACLs.
+
+                licenseRef:
+                  type: string
+                  enum: [free, pro, enterprise]
+                  description: License tier for this tenant
+
+                milvusCollection:
+                  type: string
+                  pattern: '^[a-z0-9_]+$'
+                  maxLength: 64
+                  description: >
+                    Name of the Milvus collection to create.
+                    Convention: {tenantId}_docs (e.g. acme_docs).
+
+                vectorDimension:
+                  type: integer
+                  enum: [384, 768, 1024, 1536, 3072]
+                  description: >
+                    Must match the active EmbeddingConfig.dimension.
+                    If they diverge, embeddings will fail schema validation.
+
+                milvusIndexType:
+                  type: string
+                  enum: [IVF_FLAT, HNSW]
+                  default: IVF_FLAT
+                  description: >
+                    IVF_FLAT: fast build, lower QPS — default for new tenants.
+                    HNSW: slower build, higher recall/QPS — migrate once corpus > 100K vectors.
+
+                hnswParams:
+                  type: object
+                  description: HNSW index parameters (used when milvusIndexType=HNSW)
+                  properties:
+                    M:
+                      type: integer
+                      default: 16
+                      minimum: 4
+                      maximum: 64
+                    efConstruction:
+                      type: integer
+                      default: 200
+                      minimum: 50
+                      maximum: 500
+
+                maxVectors:
+                  type: integer
+                  description: >
+                    Soft limit on vectors stored (enforced by Quota Service, not Milvus).
+                    Defaults to the license-tier limit when absent.
+
+                dedicatedNamespace:
+                  type: boolean
+                  default: false
+                  description: >
+                    When true, create a dedicated K8s namespace (tenant-{tenantId})
+                    with ResourceQuota. Intended for Enterprise tenants only.
+                    Requires pipeline-operator ClusterRole.
+
+                dedicatedNamespaceQuota:
+                  type: object
+                  description: ResourceQuota for the dedicated namespace (dedicatedNamespace=true)
+                  properties:
+                    cpu:
+                      type: string
+                      default: "8"
+                    memory:
+                      type: string
+                      default: "16Gi"
+                    gpuLimit:
+                      type: string
+                      default: "1"
+                    pods:
+                      type: integer
+                      default: 20
+
+                retentionDays:
+                  type: integer
+                  default: 365
+                  minimum: 1
+                  description: >
+                    Number of days to retain vectors after their source document
+                    is deleted. A background job enforces this via Milvus TTL.
+
+            status:
+              type: object
+              properties:
+
+                state:
+                  type: string
+                  enum: [Provisioning, Provisioned, Updating, Deleting, Error]
+
+                milvusCollection:
+                  type: string
+
+                milvusCollectionId:
+                  type: string
+
+                vectorCount:
+                  type: integer
+
+                dedicatedNamespaceName:
+                  type: string
+
+                kafkaUserName:
+                  type: string
+
+                quotaRegistered:
+                  type: boolean
+
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                        enum:
+                          - MilvusCollectionReady
+                          - KafkaUserReady
+                          - QuotaRegistered
+                          - NamespaceReady
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:     {type: string}
+                      message:    {type: string}
+                      lastTransitionTime: {type: string, format: date-time}
+
+                lastReconciled:
+                  type: string
+                  format: date-time

@@ -229,4 +229,69 @@ spec:
 | Quota management | Admin | Per-tenant usage table; inline override editing |
 | Workspaces | User | Grid of workspace cards; create/delete |
 | Data sources | User | Tree: S3 buckets / NFS folders / DB tables / Kafka topics |
+| **Add data source wizard** | **User** | **4-step self-service wizard (see §9)** |
 | File browser | User | Paginated table: name, type, size, modified, chunk count, ingest status |
+
+---
+
+## 9. Add Data Source Wizard
+
+Users add their own sources without admin involvement, subject to connector quota. Triggered from the Data sources screen via "Add source".
+
+### Step 1 — Choose type
+
+| Type | When to use |
+|---|---|
+| Cloud storage (S3) | S3-compatible buckets (AWS S3, MinIO, GCS via S3 compat) |
+| NFS / File server | Directories on the NFS mount already provisioned by admin |
+| Database | PostgreSQL/MySQL tables with a text or document column |
+| Kafka stream | Live topics — messages treated as document events |
+| File upload | Browser-direct upload of PDF/DOCX/TXT/CSV up to 100 MB each |
+
+### Step 2 — Configure connection
+
+Dynamic form per source type. Credentials entered inline are stored as a K8s Secret named `connector-{slug}-creds`; the raw values are never returned by the API (`writeOnly: true` in schema).
+
+**File upload path:** no form fields — user gets a drag-and-drop zone. Files go directly to MinIO under `{tenant_id}/uploads/{session_id}/`. No `DataConnector` CR is created; an upload-watcher CronJob (provisioned by TenantWorkspace operator) picks them up within 30 s.
+
+### Step 3 — Test & preview
+
+Calls `POST /api/sources/test` (15 s timeout). Returns connection latency and a preview of the first 10 files. Step 4 is blocked until test passes (upload type skips this step).
+
+### Step 4 — Name & settings
+
+- Source name, sync frequency, file type filter, max file size
+- Optional: attach immediately to an existing workspace
+- "Start ingestion immediately" checkbox (default on)
+
+### Submit flow
+
+```
+POST /api/sources/create
+  → BFF: QuotaService.CheckQuota(CONNECTOR_COUNT)
+  → BFF: kubectl apply DataConnector CR
+  → Pipeline Operator reconciles → Deployment/CronJob + KafkaTopic + KafkaUser
+  → If workspace_id set: POST /api/workspaces/{id}/sources
+  → 201 UserSource { status: provisioning }
+```
+
+Success screen shows a live ingestion progress bar polling every 5 s.
+
+### Connector quota
+
+| License | Max connectors |
+|---|---|
+| Free | 2 |
+| Pro | 4 |
+| Enterprise | Unlimited |
+
+### New API endpoints
+
+```
+POST   /api/sources/create          create connector (all types except upload)
+POST   /api/sources/test            test connection without creating anything
+POST   /api/sources/upload          multipart file upload
+POST   /api/sources/{id}/pause      pause sync
+POST   /api/sources/{id}/resume     resume sync
+DELETE /api/sources/{id}            delete (does not remove indexed vectors)
+```

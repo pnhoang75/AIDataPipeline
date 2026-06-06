@@ -1,0 +1,1651 @@
+openapi: 3.1.0
+
+info:
+  title: AI Data Pipeline — Pipeline Management API (BFF)
+  version: 1.0.0
+  description: |
+    Backend-for-frontend aggregating Keycloak Admin, Milvus, Kafka Admin,
+    MinIO, and Quota Service. All endpoints require a valid JWT; Kong
+    injects `X-Tenant-ID` and `X-User-Roles` before forwarding.
+
+    **Role model:**
+    - `pipeline-admin` — full access to all admin endpoints
+    - `pipeline-user`  — access to workspace/source/file endpoints,
+      scoped to caller's tenant
+
+servers:
+  - url: https://pipeline.local/api
+    description: kind testbed
+  - url: https://pipeline.acme.com/api
+    description: production
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: pipeline-status
+    description: Live pipeline health and component status
+  - name: connectors
+    description: Source connector CRUD
+  - name: pipeline-config
+    description: Chunking and embedding configuration
+  - name: tenants
+    description: Tenant and user management
+  - name: quota
+    description: Quota usage and overrides
+  - name: workspaces
+    description: User workspace management
+  - name: sources
+    description: Data source browser
+  - name: files
+    description: File metadata and ingest status
+  - name: user-sources
+    description: User self-service data source creation and management
+
+# ─────────────────────────────────────────────
+# ADMIN — Pipeline Status
+# ─────────────────────────────────────────────
+paths:
+
+  /admin/pipeline/status:
+    get:
+      tags: [pipeline-status]
+      operationId: getPipelineStatus
+      summary: Live status of all pipeline components
+      description: |
+        Aggregates K8s pod status, Kafka consumer-group lag, and Milvus
+        collection counts. Requires `pipeline-admin`.
+      responses:
+        '200':
+          description: Pipeline status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+# ─────────────────────────────────────────────
+# ADMIN — Connectors
+# ─────────────────────────────────────────────
+
+  /admin/connectors:
+    get:
+      tags: [connectors]
+      operationId: listConnectors
+      summary: List all source connectors across tenants
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: tenant_id
+          in: query
+          schema: {type: string, format: uuid}
+        - name: source_type
+          in: query
+          schema: {type: string, enum: [s3, nfs, database, stream]}
+        - name: status
+          in: query
+          schema: {type: string, enum: [active, degraded, paused, error]}
+      responses:
+        '200':
+          description: Paginated connector list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [connectors]
+      operationId: createConnector
+      summary: Create a new source connector
+      description: Creates a K8s `DataConnector` CR; the Pipeline Operator provisions the workload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectorCreate'
+      responses:
+        '201':
+          description: Connector created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/connectors/{connector_id}:
+    get:
+      tags: [connectors]
+      operationId: getConnector
+      summary: Get connector detail
+      parameters:
+        - $ref: '#/components/parameters/ConnectorIdParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+          description: Connector detail
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      tags: [connectors]
+      operationId: updateConnector
+      summary: Update connector configuration
+      description: Patches the `DataConnector` CR; operator triggers rolling restart.
+      parameters:
+        - $ref: '#/components/parameters/ConnectorIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectorUpdate'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+          description: Updated connector
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [connectors]
+      operationId: deleteConnector
+      summary: Delete connector and its K8s resources
+      parameters:
+        - $ref: '#/components/parameters/ConnectorIdParam'
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /admin/connectors/{connector_id}/pause:
+    post:
+      tags: [connectors]
+      operationId: pauseConnector
+      summary: Pause connector polling/watching
+      parameters:
+        - $ref: '#/components/parameters/ConnectorIdParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+          description: Paused connector
+
+  /admin/connectors/{connector_id}/resume:
+    post:
+      tags: [connectors]
+      operationId: resumeConnector
+      summary: Resume a paused connector
+      parameters:
+        - $ref: '#/components/parameters/ConnectorIdParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+          description: Resumed connector
+
+# ─────────────────────────────────────────────
+# ADMIN — Pipeline Config
+# ─────────────────────────────────────────────
+
+  /admin/pipeline/config:
+    get:
+      tags: [pipeline-config]
+      operationId: getPipelineConfig
+      summary: Get current pipeline configuration
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineConfig'
+          description: Current config
+
+    put:
+      tags: [pipeline-config]
+      operationId: updatePipelineConfig
+      summary: Update pipeline configuration
+      description: |
+        Patches the `pipeline-config` ConfigMap and the `EmbeddingConfig` CR.
+        The Pipeline Operator triggers a rolling restart of affected workers.
+
+        **Warning:** changing `embedding_dimension` blocks until
+        `reindex_confirmed: true` is set.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PipelineConfigUpdate'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineConfig'
+          description: Updated config
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Dimension change requires re-index confirmation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+# ─────────────────────────────────────────────
+# ADMIN — Tenants
+# ─────────────────────────────────────────────
+
+  /admin/tenants:
+    get:
+      tags: [tenants]
+      operationId: listTenants
+      summary: List all tenants
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: license_type
+          in: query
+          schema: {type: string, enum: [free, pro, enterprise]}
+        - name: status
+          in: query
+          schema: {type: string, enum: [active, suspended, expired]}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantPage'
+          description: Paginated tenant list
+
+    post:
+      tags: [tenants]
+      operationId: createTenant
+      summary: Create a new tenant
+      description: |
+        Creates: Keycloak Organization, Milvus collection, Kafka ACLs,
+        quota DB record, and `TenantWorkspace` CR.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantCreate'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+          description: Tenant created
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /admin/tenants/{tenant_id}:
+    get:
+      tags: [tenants]
+      operationId: getTenant
+      summary: Get tenant detail including quota usage
+      parameters:
+        - $ref: '#/components/parameters/TenantIdParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantDetail'
+          description: Tenant detail
+
+    delete:
+      tags: [tenants]
+      operationId: deleteTenant
+      summary: Delete tenant and all associated resources
+      description: |
+        Deletes Keycloak Organization, Milvus collection, Kafka ACLs,
+        quota records, and `TenantWorkspace` CR. **Irreversible.**
+      parameters:
+        - $ref: '#/components/parameters/TenantIdParam'
+      responses:
+        '204':
+          description: Deleted
+
+  /admin/tenants/{tenant_id}/license:
+    patch:
+      tags: [tenants]
+      operationId: updateTenantLicense
+      summary: Change license tier
+      parameters:
+        - $ref: '#/components/parameters/TenantIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LicenseUpdate'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+          description: Updated tenant
+
+  /admin/tenants/{tenant_id}/users:
+    get:
+      tags: [tenants]
+      operationId: listTenantUsers
+      summary: List users in a tenant
+      parameters:
+        - $ref: '#/components/parameters/TenantIdParam'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPage'
+          description: Paginated user list
+
+    post:
+      tags: [tenants]
+      operationId: inviteUser
+      summary: Invite a user to the tenant
+      parameters:
+        - $ref: '#/components/parameters/TenantIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserInvite'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: User invited
+
+  /admin/tenants/{tenant_id}/users/{user_id}:
+    patch:
+      tags: [tenants]
+      operationId: updateUser
+      summary: Update user role
+      parameters:
+        - $ref: '#/components/parameters/TenantIdParam'
+        - $ref: '#/components/parameters/UserIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+          description: Updated user
+
+    delete:
+      tags: [tenants]
+      operationId: removeUser
+      summary: Remove user from tenant
+      parameters:
+        - $ref: '#/components/parameters/TenantIdParam'
+        - $ref: '#/components/parameters/UserIdParam'
+      responses:
+        '204':
+          description: Removed
+
+# ─────────────────────────────────────────────
+# ADMIN — Quota
+# ─────────────────────────────────────────────
+
+  /admin/quota:
+    get:
+      tags: [quota]
+      operationId: listQuotaUsage
+      summary: Quota usage across all tenants
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: metric
+          in: query
+          schema:
+            type: string
+            enum: [bytes_per_month, vectors_stored, api_calls_per_day, gpu_seconds_per_month]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaUsagePage'
+          description: Quota usage list
+
+  /admin/quota/{tenant_id}/{metric}:
+    put:
+      tags: [quota]
+      operationId: overrideQuota
+      summary: Override a quota limit for a tenant
+      parameters:
+        - $ref: '#/components/parameters/TenantIdParam'
+        - name: metric
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [bytes_per_month, vectors_stored, api_calls_per_day, gpu_seconds_per_month]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuotaOverride'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaLimit'
+          description: Updated quota
+
+    delete:
+      tags: [quota]
+      operationId: removeQuotaOverride
+      summary: Remove override — revert to license-tier default
+      parameters:
+        - $ref: '#/components/parameters/TenantIdParam'
+        - name: metric
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '204':
+          description: Override removed
+
+# ─────────────────────────────────────────────
+# USER — Workspaces
+# ─────────────────────────────────────────────
+
+  /workspaces:
+    get:
+      tags: [workspaces]
+      operationId: listWorkspaces
+      summary: List workspaces for the authenticated user
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspacePage'
+          description: Workspace list
+
+    post:
+      tags: [workspaces]
+      operationId: createWorkspace
+      summary: Create a new workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceCreate'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+          description: Workspace created
+
+  /workspaces/{workspace_id}:
+    get:
+      tags: [workspaces]
+      operationId: getWorkspace
+      summary: Get workspace detail
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+          description: Workspace detail
+
+    patch:
+      tags: [workspaces]
+      operationId: updateWorkspace
+      summary: Update workspace name/description
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkspaceUpdate'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+          description: Updated workspace
+
+    delete:
+      tags: [workspaces]
+      operationId: deleteWorkspace
+      summary: Delete workspace
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdParam'
+      responses:
+        '204':
+          description: Deleted
+
+  /workspaces/{workspace_id}/sources:
+    get:
+      tags: [workspaces]
+      operationId: listWorkspaceSources
+      summary: List sources attached to a workspace
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sources:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkspaceSource'
+          description: Source list
+
+    post:
+      tags: [workspaces]
+      operationId: attachSource
+      summary: Attach a source path to a workspace
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceAttach'
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceSource'
+          description: Source attached
+
+  /workspaces/{workspace_id}/sources/{source_id}:
+    delete:
+      tags: [workspaces]
+      operationId: detachSource
+      summary: Detach a source from a workspace
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdParam'
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '204':
+          description: Detached
+
+# ─────────────────────────────────────────────
+# USER — Data Source Browser
+# ─────────────────────────────────────────────
+
+  /sources:
+    get:
+      tags: [sources]
+      operationId: listSources
+      summary: List available connectors for the caller's tenant
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sources:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SourceSummary'
+          description: Source list
+
+  /sources/{connector_id}/browse:
+    get:
+      tags: [sources]
+      operationId: browseSourceRoot
+      summary: Browse root of a source
+      parameters:
+        - $ref: '#/components/parameters/ConnectorIdParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowsePage'
+          description: Root listing
+
+  /sources/{connector_id}/browse/{path}:
+    get:
+      tags: [sources]
+      operationId: browseSourcePath
+      summary: Browse a sub-path within a source
+      parameters:
+        - $ref: '#/components/parameters/ConnectorIdParam'
+        - name: path
+          in: path
+          required: true
+          schema: {type: string}
+          description: URL-encoded path within the source (bucket prefix, NFS directory, DB schema, topic prefix)
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowsePage'
+          description: Path listing
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+# ─────────────────────────────────────────────
+# USER — File Metadata
+# ─────────────────────────────────────────────
+
+  /workspaces/{workspace_id}/files:
+    get:
+      tags: [files]
+      operationId: listFiles
+      summary: Paginated file list with ingest status
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdParam'
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: status
+          in: query
+          schema: {type: string, enum: [pending, indexing, indexed, error]}
+        - name: source_type
+          in: query
+          schema: {type: string, enum: [s3, nfs, database, stream]}
+        - name: q
+          in: query
+          schema: {type: string}
+          description: Filename search (prefix match)
+        - name: sort
+          in: query
+          schema: {type: string, enum: [name, size, modified, status], default: modified}
+        - name: order
+          in: query
+          schema: {type: string, enum: [asc, desc], default: desc}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilePage'
+          description: File list
+
+  /workspaces/{workspace_id}/files/{file_id}:
+    get:
+      tags: [files]
+      operationId: getFile
+      summary: Get single file detail including chunks and parse errors
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdParam'
+        - $ref: '#/components/parameters/FileIdParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileDetail'
+          description: File detail
+
+# ─────────────────────────────────────────────────────────────────────────────
+# USER — Self-Service Source Creation
+# Users (not just admins) can create connectors scoped to their own tenant,
+# subject to their license quota (max connector count).
+# ─────────────────────────────────────────────────────────────────────────────
+
+  /sources/create:
+    post:
+      tags: [user-sources]
+      operationId: createUserSource
+      summary: Create a new data source connector (self-service)
+      description: |
+        Creates a `DataConnector` CR scoped to the caller's tenant.
+        Quota is checked before creation — returns 429 if the tenant
+        has reached its connector limit.
+
+        For `upload` source type, no connector CR is created; files are
+        written directly to MinIO under the tenant prefix and a lightweight
+        upload-watcher connector handles them.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserSourceCreate'
+            examples:
+              s3:
+                summary: S3 bucket
+                value:
+                  source_type: s3
+                  name: "Q4 Finance Reports"
+                  endpoint: "s3://acme-reports/2024-Q4/"
+                  secret:
+                    access_key_id: "AKIAIOSFODNN7EXAMPLE"
+                    secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+                  poll_interval: "5m"
+                  file_types: [pdf, docx, txt]
+                  workspace_id: "uuid-of-workspace"
+              nfs:
+                summary: NFS path
+                value:
+                  source_type: nfs
+                  name: "Shared Reports Folder"
+                  endpoint: "/mnt/nfs/reports/2024"
+                  poll_interval: "5m"
+                  file_types: [pdf, docx]
+              database:
+                summary: PostgreSQL table
+                value:
+                  source_type: database
+                  name: "Product Docs DB"
+                  endpoint: "postgresql://reader:pass@db.internal:5432/proddb"
+                  db_config:
+                    schema: public
+                    tables: ["documents", "articles"]
+                    content_column: body
+                    watermark_column: updated_at
+              stream:
+                summary: Kafka topic
+                value:
+                  source_type: stream
+                  name: "Live Event Feed"
+                  endpoint: "acme.documents.*"
+                  stream_config:
+                    consumer_group: "pipeline-acme-live"
+                    start_from: latest
+              upload:
+                summary: File upload (no connector CR — MinIO direct)
+                value:
+                  source_type: upload
+                  name: "Manual Upload — Q4 PDFs"
+                  workspace_id: "uuid-of-workspace"
+      responses:
+        '201':
+          description: Source created; ingestion will start shortly
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSource'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '429':
+          description: Connector quota reached for this tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: QUOTA_EXCEEDED
+                message: "Pro license allows up to 4 connectors (4 in use)"
+                detail: {metric: connector_count, limit: 4, current: 4}
+
+  /sources/test:
+    post:
+      tags: [user-sources]
+      operationId: testSourceConnection
+      summary: Test a source connection before saving
+      description: |
+        Validates credentials and reachability, then returns a preview of
+        the first 10 files/objects/rows found. Does NOT create any resources.
+        Response is synchronous; times out after 15 seconds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceTestRequest'
+      responses:
+        '200':
+          description: Connection result (check `success` field)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceTestResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '408':
+          description: Connection timed out (15 s)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /sources/{connector_id}:
+    delete:
+      tags: [user-sources]
+      operationId: deleteUserSource
+      summary: Delete a source created by the caller
+      description: |
+        Deletes the `DataConnector` CR and its K8s workload.
+        Only the tenant member who created the source (or a tenant admin)
+        may delete it.  Files already indexed are NOT removed from Milvus.
+      parameters:
+        - $ref: '#/components/parameters/ConnectorIdParam'
+      responses:
+        '204':
+          description: Deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /sources/{connector_id}/pause:
+    post:
+      tags: [user-sources]
+      operationId: pauseUserSource
+      summary: Pause a source (stop syncing without deleting)
+      parameters:
+        - $ref: '#/components/parameters/ConnectorIdParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSource'
+          description: Paused
+
+  /sources/{connector_id}/resume:
+    post:
+      tags: [user-sources]
+      operationId: resumeUserSource
+      summary: Resume a paused source
+      parameters:
+        - $ref: '#/components/parameters/ConnectorIdParam'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSource'
+          description: Resumed
+
+  /sources/upload:
+    post:
+      tags: [user-sources]
+      operationId: uploadFiles
+      summary: Upload files directly for indexing
+      description: |
+        Multipart file upload. Files are stored in MinIO under
+        `{tenant_id}/uploads/{upload_session_id}/`. The upload-watcher
+        connector picks them up within 30 seconds and begins ingestion.
+
+        Max file size: 100 MB per file. Max 50 files per request.
+        Supported: PDF, DOCX, TXT, HTML, CSV, JSON.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: One or more files to upload
+                workspace_id:
+                  type: string
+                  format: uuid
+                  description: Automatically attach uploaded files to this workspace
+      responses:
+        '202':
+          description: Upload accepted; ingestion queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          description: File too large (>100 MB)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Upload quota exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /workspaces/{workspace_id}/files/{file_id}/reindex:
+    post:
+      tags: [files]
+      operationId: reindexFile
+      summary: Trigger re-ingestion of a single file
+      description: Re-publishes the file to the `raw-documents` Kafka topic.
+      parameters:
+        - $ref: '#/components/parameters/WorkspaceIdParam'
+        - $ref: '#/components/parameters/FileIdParam'
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+          description: Re-index accepted
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+# ─────────────────────────────────────────────
+# Components
+# ─────────────────────────────────────────────
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  # ── Parameters ──────────────────────────────
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      schema: {type: integer, minimum: 1, default: 1}
+    PageSizeParam:
+      name: page_size
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+    ConnectorIdParam:
+      name: connector_id
+      in: path
+      required: true
+      schema: {type: string}
+    TenantIdParam:
+      name: tenant_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    UserIdParam:
+      name: user_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    WorkspaceIdParam:
+      name: workspace_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    SourceIdParam:
+      name: source_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    FileIdParam:
+      name: file_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+
+  # ── Pagination wrapper ───────────────────────
+  schemas:
+
+    Pagination:
+      type: object
+      required: [page, page_size, total, total_pages]
+      properties:
+        page:        {type: integer}
+        page_size:   {type: integer}
+        total:       {type: integer}
+        total_pages: {type: integer}
+
+    # ── Pipeline status ──────────────────────
+
+    PipelineStatus:
+      type: object
+      properties:
+        overall:
+          type: string
+          enum: [healthy, degraded, critical]
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComponentStatus'
+        kafka_lag:
+          type: object
+          properties:
+            raw_documents:    {type: integer}
+            document_chunks:  {type: integer}
+        updated_at:
+          type: string
+          format: date-time
+
+    ComponentStatus:
+      type: object
+      required: [name, type, status]
+      properties:
+        name:         {type: string}
+        type:         {type: string, enum: [connector, processor, embedding_worker, rag_api, operator]}
+        status:       {type: string, enum: [running, degraded, error, paused]}
+        replicas_ready: {type: integer}
+        replicas_desired: {type: integer}
+        last_event:   {type: string}
+        last_event_at: {type: string, format: date-time}
+
+    # ── Connectors ───────────────────────────
+
+    Connector:
+      type: object
+      required: [id, name, source_type, tenant_id, status]
+      properties:
+        id:            {type: string}
+        name:          {type: string}
+        source_type:   {type: string, enum: [s3, nfs, database, stream]}
+        tenant_id:     {type: string, format: uuid}
+        tenant_name:   {type: string}
+        status:        {type: string, enum: [active, degraded, paused, error]}
+        endpoint:      {type: string}
+        poll_interval: {type: string, example: "5m"}
+        file_types:    {type: array, items: {type: string}}
+        docs_ingested: {type: integer}
+        last_run_at:   {type: string, format: date-time}
+        error_message: {type: string}
+        created_at:    {type: string, format: date-time}
+
+    ConnectorCreate:
+      type: object
+      required: [name, source_type, tenant_id, endpoint]
+      properties:
+        name:          {type: string, minLength: 1, maxLength: 64}
+        source_type:   {type: string, enum: [s3, nfs, database, stream]}
+        tenant_id:     {type: string, format: uuid}
+        endpoint:      {type: string, example: "s3://acme-reports/"}
+        poll_interval: {type: string, default: "5m", example: "5m"}
+        file_types:    {type: array, items: {type: string}, default: [pdf, docx, txt]}
+        secret_ref:    {type: string, description: "K8s Secret name containing credentials"}
+
+    ConnectorUpdate:
+      type: object
+      properties:
+        endpoint:      {type: string}
+        poll_interval: {type: string}
+        file_types:    {type: array, items: {type: string}}
+        paused:        {type: boolean}
+
+    ConnectorPage:
+      allOf:
+        - type: object
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/Connector'}}
+        - $ref: '#/components/schemas/Pagination'
+
+    # ── Pipeline config ──────────────────────
+
+    PipelineConfig:
+      type: object
+      properties:
+        chunk_size_tokens:    {type: integer, example: 512}
+        chunk_overlap_tokens: {type: integer, example: 64}
+        chunking_strategy:    {type: string, enum: [fixed, sentence, semantic], example: fixed}
+        embedding_backend:    {type: string, enum: [local-cpu, local-gpu, openai], example: local-cpu}
+        embedding_model:      {type: string, example: "BAAI/bge-small-en-v1.5"}
+        embedding_dimension:  {type: integer, example: 384}
+        embedding_device:     {type: string, enum: [cpu, cuda], example: cpu}
+        embedding_batch_size: {type: integer, example: 32}
+        worker_replicas:      {type: integer, example: 2}
+        milvus_index_type:    {type: string, enum: [IVF_FLAT, HNSW], example: IVF_FLAT}
+        updated_at:           {type: string, format: date-time}
+
+    PipelineConfigUpdate:
+      type: object
+      properties:
+        chunk_size_tokens:    {type: integer, minimum: 64, maximum: 4096}
+        chunk_overlap_tokens: {type: integer, minimum: 0, maximum: 512}
+        chunking_strategy:    {type: string, enum: [fixed, sentence, semantic]}
+        embedding_backend:    {type: string, enum: [local-cpu, local-gpu, openai]}
+        embedding_model:      {type: string}
+        embedding_batch_size: {type: integer, minimum: 1, maximum: 256}
+        worker_replicas:      {type: integer, minimum: 1, maximum: 16}
+        milvus_index_type:    {type: string, enum: [IVF_FLAT, HNSW]}
+        reindex_confirmed:    {type: boolean, description: "Must be true when changing embedding_dimension"}
+
+    # ── Tenants ──────────────────────────────
+
+    Tenant:
+      type: object
+      required: [id, name, license_type, status]
+      properties:
+        id:           {type: string, format: uuid}
+        name:         {type: string}
+        slug:         {type: string, description: "Used in Milvus collection name: {slug}_docs"}
+        license_type: {type: string, enum: [free, pro, enterprise]}
+        status:       {type: string, enum: [active, suspended, expired]}
+        user_count:   {type: integer}
+        connector_count: {type: integer}
+        licensed_at:  {type: string, format: date-time}
+        expires_at:   {type: string, format: date-time, nullable: true}
+        created_at:   {type: string, format: date-time}
+
+    TenantDetail:
+      allOf:
+        - $ref: '#/components/schemas/Tenant'
+        - type: object
+          properties:
+            quota_usage:
+              type: array
+              items:
+                $ref: '#/components/schemas/QuotaUsage'
+            milvus_collection:
+              type: string
+
+    TenantCreate:
+      type: object
+      required: [name, slug, license_type]
+      properties:
+        name:           {type: string, minLength: 1, maxLength: 128}
+        slug:           {type: string, pattern: '^[a-z0-9-]+$', maxLength: 32}
+        license_type:   {type: string, enum: [free, pro, enterprise]}
+        admin_email:    {type: string, format: email}
+        expires_at:     {type: string, format: date-time, nullable: true}
+        dedicated_namespace: {type: boolean, default: false}
+
+    TenantPage:
+      allOf:
+        - type: object
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/Tenant'}}
+        - $ref: '#/components/schemas/Pagination'
+
+    LicenseUpdate:
+      type: object
+      required: [license_type]
+      properties:
+        license_type: {type: string, enum: [free, pro, enterprise]}
+        expires_at:   {type: string, format: date-time, nullable: true}
+
+    # ── Users ────────────────────────────────
+
+    User:
+      type: object
+      required: [id, email, role, status]
+      properties:
+        id:         {type: string, format: uuid}
+        email:      {type: string, format: email}
+        first_name: {type: string}
+        last_name:  {type: string}
+        role:       {type: string, enum: [admin, developer, viewer]}
+        status:     {type: string, enum: [active, pending, suspended]}
+        created_at: {type: string, format: date-time}
+
+    UserInvite:
+      type: object
+      required: [email, role]
+      properties:
+        email: {type: string, format: email}
+        role:  {type: string, enum: [admin, developer, viewer]}
+
+    UserUpdate:
+      type: object
+      properties:
+        role:   {type: string, enum: [admin, developer, viewer]}
+        status: {type: string, enum: [active, suspended]}
+
+    UserPage:
+      allOf:
+        - type: object
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/User'}}
+        - $ref: '#/components/schemas/Pagination'
+
+    # ── Quota ────────────────────────────────
+
+    QuotaUsage:
+      type: object
+      properties:
+        metric:       {type: string}
+        current:      {type: integer}
+        limit:        {type: integer, nullable: true, description: "null = unlimited"}
+        usage_ratio:  {type: number, format: float}
+        window:       {type: string, example: "2026-06"}
+        overridden:   {type: boolean}
+
+    QuotaLimit:
+      type: object
+      properties:
+        tenant_id:      {type: string, format: uuid}
+        metric:         {type: string}
+        limit:          {type: integer}
+        overridden:     {type: boolean}
+        override_note:  {type: string}
+
+    QuotaOverride:
+      type: object
+      required: [limit]
+      properties:
+        limit: {type: integer, minimum: 0, description: "0 = block entirely; use null to remove override"}
+        note:  {type: string, maxLength: 256}
+
+    QuotaUsagePage:
+      allOf:
+        - type: object
+          properties:
+            items:
+              type: array
+              items:
+                allOf:
+                  - type: object
+                    properties:
+                      tenant_id:   {type: string, format: uuid}
+                      tenant_name: {type: string}
+                  - $ref: '#/components/schemas/QuotaUsage'
+        - $ref: '#/components/schemas/Pagination'
+
+    # ── Workspaces ───────────────────────────
+
+    Workspace:
+      type: object
+      required: [id, name, status]
+      properties:
+        id:           {type: string, format: uuid}
+        name:         {type: string}
+        description:  {type: string}
+        status:       {type: string, enum: [empty, ingesting, ready, error]}
+        source_count: {type: integer}
+        file_count:   {type: integer}
+        indexed_count:{type: integer}
+        error_count:  {type: integer}
+        created_at:   {type: string, format: date-time}
+        updated_at:   {type: string, format: date-time}
+
+    WorkspaceCreate:
+      type: object
+      required: [name]
+      properties:
+        name:        {type: string, minLength: 1, maxLength: 128}
+        description: {type: string, maxLength: 512}
+
+    WorkspaceUpdate:
+      type: object
+      properties:
+        name:        {type: string}
+        description: {type: string}
+
+    WorkspacePage:
+      allOf:
+        - type: object
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/Workspace'}}
+        - $ref: '#/components/schemas/Pagination'
+
+    WorkspaceSource:
+      type: object
+      required: [id, connector_id, path_prefix]
+      properties:
+        id:            {type: string, format: uuid}
+        connector_id:  {type: string}
+        connector_name:{type: string}
+        source_type:   {type: string, enum: [s3, nfs, database, stream]}
+        path_prefix:   {type: string}
+        file_count:    {type: integer}
+        indexed_count: {type: integer}
+        added_at:      {type: string, format: date-time}
+
+    SourceAttach:
+      type: object
+      required: [connector_id, path_prefix]
+      properties:
+        connector_id: {type: string}
+        path_prefix:  {type: string, example: "s3://acme-reports/2024-Q4/"}
+
+    # ── Source browser ───────────────────────
+
+    SourceSummary:
+      type: object
+      required: [connector_id, name, source_type, status]
+      properties:
+        connector_id: {type: string}
+        name:         {type: string}
+        source_type:  {type: string, enum: [s3, nfs, database, stream]}
+        status:       {type: string, enum: [active, degraded, paused, error]}
+        endpoint:     {type: string}
+
+    BrowseEntry:
+      type: object
+      required: [name, type]
+      properties:
+        name:         {type: string}
+        type:         {type: string, enum: [folder, file, table, topic]}
+        path:         {type: string, description: "Full path for use in subsequent browse calls"}
+        size_bytes:   {type: integer}
+        modified_at:  {type: string, format: date-time}
+        file_count:   {type: integer, description: "For folders: number of direct children"}
+        ingest_status:{type: string, enum: [pending, indexing, indexed, error, not_indexed]}
+
+    BrowsePage:
+      allOf:
+        - type: object
+          properties:
+            connector_id:  {type: string}
+            path:          {type: string}
+            entries:
+              type: array
+              items:
+                $ref: '#/components/schemas/BrowseEntry'
+        - $ref: '#/components/schemas/Pagination'
+
+    # ── Files ────────────────────────────────
+
+    FileSummary:
+      type: object
+      required: [id, file_path, ingest_status]
+      properties:
+        id:             {type: string, format: uuid}
+        file_path:      {type: string}
+        file_name:      {type: string}
+        content_type:   {type: string}
+        size_bytes:     {type: integer}
+        modified_at:    {type: string, format: date-time}
+        source_type:    {type: string, enum: [s3, nfs, database, stream]}
+        connector_id:   {type: string}
+        ingest_status:  {type: string, enum: [pending, indexing, indexed, error]}
+        chunk_count:    {type: integer, nullable: true}
+        indexed_at:     {type: string, format: date-time, nullable: true}
+
+    FileDetail:
+      allOf:
+        - $ref: '#/components/schemas/FileSummary'
+        - type: object
+          properties:
+            error_message: {type: string, nullable: true}
+            chunks:
+              type: array
+              items:
+                $ref: '#/components/schemas/ChunkSummary'
+
+    ChunkSummary:
+      type: object
+      properties:
+        chunk_id:    {type: string}
+        chunk_index: {type: integer}
+        text_preview:{type: string, description: "First 200 characters of the chunk"}
+        score:       {type: number, format: float, description: "Embedding norm (quality indicator)"}
+
+    FilePage:
+      allOf:
+        - type: object
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/FileSummary'}}
+        - $ref: '#/components/schemas/Pagination'
+
+    # ── Shared ───────────────────────────────
+
+    JobAccepted:
+      type: object
+      required: [job_id, status]
+      properties:
+        job_id:  {type: string, format: uuid}
+        status:  {type: string, enum: [accepted]}
+        message: {type: string}
+
+    # ── User source creation ─────────────────
+
+    UserSourceCreate:
+      type: object
+      required: [source_type, name]
+      properties:
+        source_type:
+          type: string
+          enum: [s3, nfs, database, stream, upload]
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Human-readable name for this source
+        endpoint:
+          type: string
+          description: Source-specific endpoint (not required for upload type)
+        poll_interval:
+          type: string
+          pattern: '^\d+[smh]$'
+          default: "5m"
+          description: Poll frequency; omit for event-driven/real-time sources
+        file_types:
+          type: array
+          items:
+            type: string
+            enum: [pdf, docx, doc, txt, html, csv, json, md]
+          default: [pdf, docx, txt]
+        max_file_size_mb:
+          type: integer
+          default: 100
+          minimum: 1
+          maximum: 500
+        workspace_id:
+          type: string
+          format: uuid
+          description: If set, the new source is immediately attached to this workspace
+        secret:
+          $ref: '#/components/schemas/InlineCredential'
+        secret_ref:
+          type: string
+          description: Name of an existing K8s Secret in the tenant namespace
+        db_config:
+          $ref: '#/components/schemas/DatabaseSourceConfig'
+        stream_config:
+          $ref: '#/components/schemas/StreamSourceConfig'
+
+    InlineCredential:
+      type: object
+      description: Inline credentials — stored as a K8s Secret; never returned in responses
+      properties:
+        access_key_id:     {type: string}
+        secret_access_key: {type: string, writeOnly: true}
+        username:          {type: string}
+        password:          {type: string, writeOnly: true}
+        connection_string: {type: string, writeOnly: true}
+
+    DatabaseSourceConfig:
+      type: object
+      properties:
+        schema:           {type: string, default: public}
+        tables:           {type: array, items: {type: string}}
+        content_column:   {type: string, description: "Column containing the document text"}
+        watermark_column: {type: string, default: updated_at}
+        batch_size:       {type: integer, default: 100}
+
+    StreamSourceConfig:
+      type: object
+      properties:
+        consumer_group: {type: string}
+        start_from:
+          type: string
+          enum: [latest, earliest]
+          default: latest
+
+    UserSource:
+      type: object
+      required: [id, name, source_type, status, created_by]
+      properties:
+        id:            {type: string}
+        name:          {type: string}
+        source_type:   {type: string, enum: [s3, nfs, database, stream, upload]}
+        status:        {type: string, enum: [provisioning, active, degraded, paused, error]}
+        endpoint:      {type: string}
+        poll_interval: {type: string}
+        file_types:    {type: array, items: {type: string}}
+        docs_ingested: {type: integer}
+        error_message: {type: string, nullable: true}
+        created_by:    {type: string, format: uuid, description: "Keycloak sub of the creating user"}
+        created_at:    {type: string, format: date-time}
+        workspace_attached:
+          type: object
+          nullable: true
+          properties:
+            workspace_id:   {type: string, format: uuid}
+            workspace_name: {type: string}
+
+    SourceTestRequest:
+      type: object
+      required: [source_type]
+      properties:
+        source_type:   {type: string, enum: [s3, nfs, database, stream]}
+        endpoint:      {type: string}
+        secret:        {$ref: '#/components/schemas/InlineCredential'}
+        secret_ref:    {type: string}
+        db_config:     {$ref: '#/components/schemas/DatabaseSourceConfig'}
+        stream_config: {$ref: '#/components/schemas/StreamSourceConfig'}
+
+    SourceTestResult:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        latency_ms:
+          type: integer
+        error:
+          type: string
+          nullable: true
+          description: Human-readable error message when success=false
+        object_count:
+          type: integer
+          description: Total objects/rows/messages found
+        preview:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/BrowseEntry'
+
+    UploadResult:
+      type: object
+      required: [upload_session_id, files_accepted]
+      properties:
+        upload_session_id:
+          type: string
+          format: uuid
+        files_accepted:
+          type: integer
+        files_rejected:
+          type: array
+          items:
+            type: object
+            properties:
+              filename: {type: string}
+              reason:   {type: string}
+        total_bytes:
+          type: integer
+        workspace_attached:
+          type: string
+          format: uuid
+          nullable: true
+        estimated_index_time_minutes:
+          type: integer
+
+    Error:
+      type: object
+      required: [error, message, request_id]
+      properties:
+        error:
+          type: string
+          enum:
+            - INVALID_REQUEST
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - NOT_FOUND
+            - CONFLICT
+            - QUOTA_EXCEEDED
+            - DIMENSION_CHANGE_REQUIRES_REINDEX
+            - INTERNAL_ERROR
+        message:    {type: string}
+        detail:     {type: object, additionalProperties: true}
+        request_id: {type: string, format: uuid}
+
+  # ── Reusable responses ────────────────────
+  responses:
+
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+    Unauthorized:
+      description: Missing or invalid JWT
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+    Forbidden:
+      description: Insufficient role
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+
+    Conflict:
+      description: Resource already exists
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}

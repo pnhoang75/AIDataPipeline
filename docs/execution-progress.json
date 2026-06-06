@@ -1,0 +1,13 @@
+{
+  "current_index": 0,
+  "current_session": "0-A",
+  "status": "not_started",
+  "last_completed": null,
+  "last_completed_at": null,
+  "last_attempt_at": null,
+  "window_started_at": null,
+  "window_reset_at": null,
+  "retry_count": 0,
+  "sessions_completed": [],
+  "sessions_failed": []
+}
