@@ -33,6 +33,14 @@ USAGE_LIMIT_POLL=1800            # recheck every 30 min after limit hit
 MAX_TURNS=80                     # max agentic turns per claude -p call
 CLAUDE_TIMEOUT=7200              # 2h wall-clock timeout per session (seconds)
 
+# Tools Claude is allowed to use without confirmation.
+# This replaces --dangerously-skip-permissions with an explicit allowlist.
+# These are the minimum tools needed for code implementation sessions.
+# Billing is NOT affected by this — it is controlled solely by authentication
+# (Claude Pro OAuth vs ANTHROPIC_API_KEY). Since no API key is set, all usage
+# is covered by the Claude Pro subscription and stops at the limit.
+ALLOWED_TOOLS="Bash,Read,Write,Edit,Glob,Grep,LS"
+
 # Usage-limit error patterns (case-insensitive grep)
 USAGE_LIMIT_PATTERNS=(
   "usage limit"
@@ -81,6 +89,24 @@ check_deps() {
     err "Install them and retry."
     exit 1
   fi
+}
+
+# ── Billing safety check ──────────────────────────────────────────────────────
+# Refuse to run if ANTHROPIC_API_KEY is set. That auth mode bills per token
+# to a credit card. This script is designed for Claude Pro subscription only.
+check_billing_safety() {
+  if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+    err "ANTHROPIC_API_KEY is set in your environment."
+    err "Running in API key mode bills per token to your credit card."
+    err "This script is intended for Claude Pro subscription use only."
+    err ""
+    err "To use your Claude Pro plan instead:"
+    err "  1. unset ANTHROPIC_API_KEY"
+    err "  2. Run: claude login   (authenticates with your Claude Pro account)"
+    err "  3. Re-run this script."
+    exit 1
+  fi
+  log "Billing check: no ANTHROPIC_API_KEY set — using Claude Pro subscription (no card charges)."
 }
 
 # ── Progress helpers ─────────────────────────────────────────────────────────
@@ -308,10 +334,13 @@ PYEOF
     local tmpout; tmpout=$(mktemp)
     local exit_code=0
 
-    # Run claude non-interactively with a wall-clock timeout
-    # --dangerously-skip-permissions lets Claude use all tools without prompting
+    # Run claude non-interactively with a wall-clock timeout.
+    # --allowedTools: explicit list of tools Claude may use without prompting.
+    # This is a UX flag (no confirmation dialogs), NOT a billing flag.
+    # Billing is determined by auth: Claude Pro OAuth = subscription only,
+    # no API key = no credit card charges beyond the monthly subscription.
     timeout "$CLAUDE_TIMEOUT" \
-      claude --dangerously-skip-permissions \
+      claude --allowedTools "$ALLOWED_TOOLS" \
              --max-turns "$MAX_TURNS" \
              -p "$prompt" \
       2>&1 | tee "$logfile" > "$tmpout" || exit_code=$?
@@ -427,6 +456,7 @@ PYEOF
 
 main() {
   check_deps
+  check_billing_safety
 
   log "${BOLD}AI Data Pipeline — Autonomous Executor${RESET}"
   log "Repo: $REPO_ROOT"
