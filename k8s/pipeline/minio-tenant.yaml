@@ -1,0 +1,38 @@
+apiVersion: minio.min.io/v2
+kind: Tenant
+metadata:
+  name: pipeline-store
+  namespace: infrastructure
+  labels:
+    app: minio
+spec:
+  image: minio/minio:RELEASE.2024-04-06T05-26-02Z
+  imagePullPolicy: IfNotPresent
+  configuration:
+    name: minio-creds
+  pools:
+    - name: pool-0
+      servers: 1
+      volumesPerServer: 1
+      volumeClaimTemplate:
+        metadata:
+          name: data
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 20Gi
+      resources:
+        requests:
+          cpu: "250m"
+          memory: 512Mi
+        limits:
+          cpu: "500m"
+          memory: 1Gi
+  buckets:
+    - name: pipeline-backups
+    - name: opa-bundles
+    - name: pipeline-artifacts
+  requestAutoCert: false
+  prometheusOperator: false

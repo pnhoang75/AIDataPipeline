@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-pipeline-infra
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/pnhoang75/AIDataPipeline.git
+    targetRevision: main
+    path: k8s/pipeline
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: infrastructure
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
