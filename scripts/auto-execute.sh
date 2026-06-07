@@ -281,15 +281,26 @@ wait_for_limit_reset() {
   local output="$1"
 
   # Parse "resets HH:MMam/pm" from Claude's message to use as probe floor.
+  # macOS date -j ignores %p (AM/PM) when parsing, so we convert to 24h manually.
   local time_str floor_epoch=0
   time_str=$(echo "$output" \
     | grep -oiE 'resets [0-9]+:[0-9]+(am|pm)' \
     | head -1 \
     | grep -oiE '[0-9]+:[0-9]+(am|pm)' \
-    | tr '[:lower:]' '[:upper:]' || true)
+    | tr '[:upper:]' '[:lower:]' || true)
 
   if [[ -n "$time_str" ]]; then
-    floor_epoch=$(date -j -f "%I:%M%p" "$time_str" "+%s" 2>/dev/null || echo 0)
+    local hour min ampm
+    hour=$(echo "$time_str" | grep -oE '^[0-9]+')
+    min=$(echo "$time_str" | grep -oE ':[0-9]+' | tr -d ':')
+    ampm=$(echo "$time_str" | grep -oiE '(am|pm)$' | tr '[:upper:]' '[:lower:]')
+    # Convert to 24h: 12am→0, 12pm→12, 1-11pm→+12
+    if [[ "$ampm" == "pm" && "$hour" -ne 12 ]]; then
+      hour=$(( hour + 12 ))
+    elif [[ "$ampm" == "am" && "$hour" -eq 12 ]]; then
+      hour=0
+    fi
+    floor_epoch=$(date -j -f "%H:%M" "$(printf '%02d:%02d' "$hour" "$min")" "+%s" 2>/dev/null || echo 0)
     local now_ts; now_ts=$(date +%s)
     # If parsed time is already in the past, it means tomorrow.
     [[ $floor_epoch -le $now_ts ]] && floor_epoch=$(( floor_epoch + 86400 ))
