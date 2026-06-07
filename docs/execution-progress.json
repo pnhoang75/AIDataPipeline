@@ -1,9 +1,9 @@
 {
-  "current_index": 6,
+  "current_index": 7,
   "current_session": "1-B",
-  "status": "running",
-  "last_completed": "1-A",
-  "last_completed_at": "2026-06-06T20:34:33Z",
+  "status": "session_complete",
+  "last_completed": "1-B",
+  "last_completed_at": "2026-06-07T00:33:02Z",
   "last_attempt_at": "2026-06-07T00:28:03Z",
   "window_started_at": "2026-06-06T00:00:00Z",
   "window_reset_at": null,
@@ -14,7 +14,8 @@
     "0-C",
     "0-D",
     "0-E",
-    "1-A"
+    "1-A",
+    "1-B"
   ],
   "sessions_failed": []
 }
