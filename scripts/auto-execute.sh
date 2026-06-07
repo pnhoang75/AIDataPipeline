@@ -417,8 +417,37 @@ PYEOF
     attempt=$(( attempt + 1 ))
     # Kill any orphaned tee/claude from a previous attempt before starting fresh.
     pkill -f "tee.*${session_id}\.log" 2>/dev/null || true
-    pkill -f "claude.*session ${session_id}" 2>/dev/null || true
+    pkill -f "claude.*allowedTools" 2>/dev/null || true
     sleep 1
+
+    # Pre-flight: probe Claude before spending the session budget.
+    # If the limit is already active, wait it out now rather than burning
+    # the attempt with a silent 0-byte stall.
+    local probe_out
+    probe_out=$(claude --max-turns 1 -p "Reply with the word ready" 2>&1 || true)
+    if is_usage_limit_error "$probe_out"; then
+      warn "Pre-flight probe: limit active before attempt ${attempt}. Waiting..."
+      python3 - "$PROGRESS_FILE" "status" "waiting_for_window_reset" <<'PYEOF'
+import sys, json
+f = sys.argv[1]
+with open(f) as fh:
+    data = json.load(fh)
+data[sys.argv[2]] = sys.argv[3]
+with open(f, 'w') as fh:
+    json.dump(data, fh, indent=2)
+PYEOF
+      wait_for_limit_reset "$probe_out"
+      python3 - "$PROGRESS_FILE" "status" "running" <<'PYEOF'
+import sys, json
+f = sys.argv[1]
+with open(f) as fh:
+    data = json.load(fh)
+data[sys.argv[2]] = sys.argv[3]
+with open(f, 'w') as fh:
+    json.dump(data, fh, indent=2)
+PYEOF
+    fi
+
     log "Attempt ${attempt} for session ${session_id}..."
 
     local tmpout; tmpout=$(mktemp)
