@@ -1,0 +1,17 @@
+---
+# ClusterIP service exposing the Redis pod at port 6379.
+# The Spotahome RedisFailover operator only creates the Sentinel service (rfs-).
+# This service lets pipeline pods talk directly to the Redis master.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: infrastructure
+spec:
+  selector:
+    app.kubernetes.io/component: redis
+    app.kubernetes.io/name: redis-standalone
+  ports:
+    - port: 6379
+      targetPort: 6379
+  type: ClusterIP

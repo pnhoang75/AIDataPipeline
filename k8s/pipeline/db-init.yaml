@@ -1,0 +1,55 @@
+---
+# One-shot Job that creates the source_file_status table in quota-db.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-init
+  namespace: ai-pipeline
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: psql
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - psql
+            - "$(POSTGRES_DSN)"
+            - -c
+            - |
+              CREATE TABLE IF NOT EXISTS source_file_status (
+                connector_id   VARCHAR(256) NOT NULL,
+                source_id      VARCHAR(256) NOT NULL,
+                event_id       VARCHAR(256),
+                ingest_status  VARCHAR(64) NOT NULL DEFAULT 'pending',
+                chunk_count    INTEGER,
+                error_message  TEXT,
+                created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (connector_id, source_id)
+              );
+          env:
+            - name: POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: pipeline-secrets
+                  key: POSTGRES_DSN
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

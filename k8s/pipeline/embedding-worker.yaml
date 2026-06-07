@@ -1,0 +1,129 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: embedding-worker
+  namespace: ai-pipeline
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: embedding-worker
+  namespace: ai-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: embedding-worker
+  template:
+    metadata:
+      labels:
+        app: embedding-worker
+    spec:
+      serviceAccountName: embedding-worker
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: embedding-worker
+          image: ai-pipeline/embedding-worker:latest
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: KAFKA_BOOTSTRAP
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-config
+                  key: KAFKA_BOOTSTRAP
+            - name: KAFKA_PRODUCE_TIMEOUT_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-config
+                  key: KAFKA_PRODUCE_TIMEOUT_MS
+            - name: POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: pipeline-secrets
+                  key: POSTGRES_DSN
+            - name: KAFKA_INPUT_TOPIC
+              value: "document-chunks"
+            - name: KAFKA_EVENT_TOPIC
+              value: "embedding-events"
+            - name: KAFKA_DLQ_TOPIC
+              value: "dlq-document-chunks"
+            - name: KAFKA_CONSUMER_GROUP
+              value: "embedding-worker"
+            - name: EMBEDDING_BACKEND
+              value: "local-cpu"
+            - name: EMBEDDING_MODEL
+              value: "BAAI/bge-small-en-v1.5"
+            - name: EMBEDDING_DIM
+              value: "384"
+            - name: EMBEDDING_BATCH_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-config
+                  key: EMBEDDING_BATCH_MAX_CHUNKS
+            - name: EMBEDDING_BATCH_TIMEOUT_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-config
+                  key: EMBEDDING_BATCH_MAX_WAIT_MS
+            - name: MILVUS_HOST
+              value: "milvus.infrastructure.svc.cluster.local"
+            - name: MILVUS_PORT
+              value: "19530"
+            - name: MILVUS_COLLECTION
+              value: "default_docs"
+            - name: SENTENCE_TRANSFORMERS_HOME
+              value: "/tmp/st-models"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: embedding-worker
+  namespace: ai-pipeline
+spec:
+  podSelector:
+    matchLabels:
+      app: embedding-worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+      ports:
+        - port: 9092
+          protocol: TCP
+        - port: 5432
+          protocol: TCP
+        - port: 19530
+          protocol: TCP
+    # Allow HTTPS for HuggingFace model download on first startup
+    - ports:
+        - port: 443
+          protocol: TCP

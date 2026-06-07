@@ -1,0 +1,44 @@
+---
+# Milvus standalone — testbed deployment via Milvus Operator 0.9
+# Uses in-cluster etcd and in-cluster MinIO (operator-managed) for simplicity.
+apiVersion: milvus.io/v1beta1
+kind: Milvus
+metadata:
+  name: milvus
+  namespace: infrastructure
+spec:
+  mode: standalone
+  dependencies:
+    etcd:
+      inCluster:
+        values:
+          replicaCount: 1
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+          persistence:
+            enabled: false
+    storage:
+      inCluster:
+        values:
+          mode: standalone
+          resources:
+            requests:
+              memory: "128Mi"
+            limits:
+              memory: "256Mi"
+          persistence:
+            enabled: false
+  components:
+    standalone:
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+        limits:
+          cpu: "500m"
+          memory: "1Gi"

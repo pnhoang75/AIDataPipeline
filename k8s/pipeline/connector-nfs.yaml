@@ -1,0 +1,121 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: connector-nfs
+  namespace: ai-pipeline
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connector-nfs
+  namespace: ai-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: connector-nfs
+  template:
+    metadata:
+      labels:
+        app: connector-nfs
+    spec:
+      serviceAccountName: connector-nfs
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: connector-nfs
+          image: ai-pipeline/connector-nfs:latest
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: KAFKA_BOOTSTRAP
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-config
+                  key: KAFKA_BOOTSTRAP
+            - name: KAFKA_PRODUCE_TIMEOUT_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-config
+                  key: KAFKA_PRODUCE_TIMEOUT_MS
+            - name: REDIS_CONNECT_TIMEOUT_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-config
+                  key: REDIS_CONNECT_TIMEOUT_MS
+            - name: REDIS_OP_TIMEOUT_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-config
+                  key: REDIS_OP_TIMEOUT_MS
+            - name: POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: pipeline-secrets
+                  key: POSTGRES_DSN
+            - name: REDIS_URL
+              value: "redis://redis.infrastructure.svc.cluster.local:6379/0"
+            - name: NFS_MOUNT_PATH
+              value: "/mnt/nfs"
+            - name: CONNECTOR_ID
+              value: "connector-nfs-default"
+            - name: TENANT_ID
+              value: "default"
+            - name: POLL_INTERVAL_SECONDS
+              value: "30"
+            - name: KAFKA_TOPIC
+              value: "raw-documents"
+            - name: ALLOWED_EXTENSIONS
+              value: ".pdf,.txt,.docx,.html,.csv,.json"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: nfs-mount
+              mountPath: /mnt/nfs
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: nfs-mount
+          emptyDir: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: connector-nfs
+  namespace: ai-pipeline
+spec:
+  podSelector:
+    matchLabels:
+      app: connector-nfs
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+      ports:
+        - port: 9092
+          protocol: TCP
+        - port: 6379
+          protocol: TCP
+        - port: 5432
+          protocol: TCP
