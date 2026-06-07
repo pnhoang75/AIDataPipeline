@@ -86,6 +86,10 @@ spec:
               value: "default_docs"
             - name: SENTENCE_TRANSFORMERS_HOME
               value: "/tmp/st-models"
+            - name: HF_HOME
+              value: "/tmp/st-models"
+            - name: HF_HUB_CACHE
+              value: "/tmp/st-models/hub"
           volumeMounts:
             - name: tmp
               mountPath: /tmp
