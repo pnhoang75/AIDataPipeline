@@ -104,6 +104,22 @@ spec:
         - name: tmp
           emptyDir: {}
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embedding-worker
+  namespace: ai-pipeline
+  labels:
+    app: embedding-worker
+spec:
+  selector:
+    app: embedding-worker
+  ports:
+    - port: 9090
+      targetPort: 9090
+      name: metrics
+  type: ClusterIP
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

@@ -2,6 +2,7 @@ import logging
 
 import psycopg2
 from confluent_kafka import Consumer, Producer
+from prometheus_client import start_http_server
 
 from backends import LocalCPUBackend, OpenAIBackend
 from config import config
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    start_http_server(9090)
     logger.info("Starting Embedding Worker (backend=%s)", config.embedding_backend)
 
     consumer = Consumer(

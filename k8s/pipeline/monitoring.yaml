@@ -1,0 +1,128 @@
+---
+# ServiceMonitor: connector-s3
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: connector-s3
+  namespace: ai-pipeline
+  labels:
+    app: connector-s3
+spec:
+  selector:
+    matchLabels:
+      app: connector-s3
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+# ServiceMonitor: connector-nfs
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: connector-nfs
+  namespace: ai-pipeline
+  labels:
+    app: connector-nfs
+spec:
+  selector:
+    matchLabels:
+      app: connector-nfs
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+# ServiceMonitor: doc-processor
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: doc-processor
+  namespace: ai-pipeline
+  labels:
+    app: doc-processor
+spec:
+  selector:
+    matchLabels:
+      app: doc-processor
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+# ServiceMonitor: embedding-worker
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: embedding-worker
+  namespace: ai-pipeline
+  labels:
+    app: embedding-worker
+spec:
+  selector:
+    matchLabels:
+      app: embedding-worker
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+# ServiceMonitor: rag-api (uses the existing http port; /metrics served by FastAPI)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rag-api
+  namespace: ai-pipeline
+  labels:
+    app: rag-api
+spec:
+  selector:
+    matchLabels:
+      app: rag-api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+---
+# PrometheusRule: pipeline alerting rules
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pipeline-alerts
+  namespace: ai-pipeline
+  labels:
+    app: pipeline-alerts
+spec:
+  groups:
+    - name: pipeline.kafka
+      rules:
+        - alert: KafkaConsumerLagHigh
+          expr: kafka_consumergroup_lag{consumergroup=~"doc-processor|embedding-worker"} > 1000
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Kafka consumer group {{ $labels.consumergroup }} lag is high ({{ $value }})"
+            description: "Consumer group {{ $labels.consumergroup }} on topic {{ $labels.topic }} has lag > 1000 for more than 5 minutes."
+
+    - name: pipeline.connectors
+      rules:
+        - alert: ConnectorDown
+          expr: up{job=~"connector-s3|connector-nfs"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Connector {{ $labels.job }} is down"
+            description: "Prometheus cannot scrape {{ $labels.job }} metrics endpoint for more than 2 minutes — connector pod may be crashed or not running."
+
+    - name: pipeline.rag
+      rules:
+        - alert: RAGLatencyHigh
+          expr: histogram_quantile(0.99, sum(rate(rag_request_duration_seconds_bucket[5m])) by (le)) > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "RAG API p99 latency is above 2 seconds"
+            description: "The 99th percentile query latency for the RAG API has exceeded 2 seconds for more than 5 minutes."

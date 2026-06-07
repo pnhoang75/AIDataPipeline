@@ -2,6 +2,7 @@ import logging
 
 from confluent_kafka import Consumer, Producer
 from minio import Minio
+from prometheus_client import start_http_server
 
 from config import config
 from fetcher import fetch_content_with_retry
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    start_http_server(9090)
     minio_client = Minio(
         config.minio_endpoint,
         access_key=config.minio_access_key,

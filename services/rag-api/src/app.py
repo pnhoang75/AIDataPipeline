@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import time as _time
 import uuid
 from typing import List, Optional
 
@@ -13,10 +14,15 @@ from models import QueryRequest, QueryResponse, QueryResult
 logger = logging.getLogger(__name__)
 
 try:
-    from prometheus_client import Counter
+    from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
     _REQ_TOTAL = Counter("rag_requests_total", "Total RAG query requests")
     _CACHE_HITS = Counter("rag_cache_hits_total", "Cache hits")
     _REDIS_UNAVAIL = Counter("redis_unavailable_total", "Redis connection errors on query path")
+    _REQ_LATENCY = Histogram(
+        "rag_request_duration_seconds",
+        "RAG query request latency",
+        buckets=[0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0],
+    )
     _METRICS_ENABLED = True
 except ImportError:
     _METRICS_ENABLED = False
@@ -52,6 +58,7 @@ class RagService:
         self._cfg = cfg or _default_config
 
     def query(self, request: QueryRequest, tenant_id: str) -> QueryResponse:
+        _start = _time.time()
         if _METRICS_ENABLED:
             _REQ_TOTAL.inc()
 
@@ -67,6 +74,7 @@ class RagService:
             if cached_raw is not None:
                 if _METRICS_ENABLED:
                     _CACHE_HITS.inc()
+                    _REQ_LATENCY.observe(_time.time() - _start)
                 return QueryResponse(
                     results=json.loads(cached_raw),
                     cached=True,
@@ -121,6 +129,8 @@ class RagService:
             except ConnectionError:
                 pass
 
+        if _METRICS_ENABLED:
+            _REQ_LATENCY.observe(_time.time() - _start)
         return QueryResponse(results=results, cached=False, request_id=request_id)
 
 
@@ -160,3 +170,11 @@ async def health_endpoint(service: RagService = Depends(get_service)):
 @app.get("/v1/collections")
 async def collections_endpoint(service: RagService = Depends(get_service)):
     return {"collections": []}
+
+
+@app.get("/metrics")
+async def metrics_endpoint():
+    from fastapi.responses import Response
+    if _METRICS_ENABLED:
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    return Response(content="# metrics disabled\n", media_type="text/plain")

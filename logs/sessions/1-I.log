@@ -1,0 +1,15 @@
+Session 1-I is complete. Here's a summary of what was accomplished:
+
+**Done-check result:** All 5 pods running in `ai-pipeline` namespace:
+- `connector-s3` 1/1 Running
+- `connector-nfs` 1/1 Running  
+- `doc-processor` 1/1 Running
+- `embedding-worker` 1/1 Running
+- `rag-api` 1/1 Running
+
+**Smoke test:** PASSED — `/v1/query` returned 5 relevant results on first attempt, confirming the full pipeline works end-to-end (MinIO → Kafka → doc-processor → embedding-worker → Milvus → RAG API).
+
+**Issues fixed during session:**
+1. Added `HF_HOME=/tmp/st-models` and `HF_HUB_CACHE=/tmp/st-models/hub` to rag-api and embedding-worker deployments — newer `huggingface_hub` needs this explicitly set for read-only rootfs containers
+2. Loaded Docker images to all kind nodes (images were only on `worker2`, new pods scheduled on `worker`)
+3. Committed earlier uncommitted changes (doc-processor Dockerfile tiktoken fix, kafka.yaml probes)

@@ -5,6 +5,7 @@ import psycopg2
 import redis as redis_lib
 from minio import Minio
 from confluent_kafka import Producer
+from prometheus_client import start_http_server
 
 from config import config
 from connector import S3Connector
@@ -42,6 +43,7 @@ def build_db_conn():
 
 
 def main() -> None:
+    start_http_server(9090)
     logger.info("Starting S3 connector (connector_id=%s)", config.connector_id)
 
     minio_client = build_minio_client()

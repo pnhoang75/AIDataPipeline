@@ -4,6 +4,7 @@ import time
 import psycopg2
 import redis as redis_lib
 from confluent_kafka import Producer
+from prometheus_client import start_http_server
 
 from config import config
 from connector import NFSConnector
@@ -32,6 +33,7 @@ def build_db_conn():
 
 
 def main() -> None:
+    start_http_server(9090)
     logger.info(
         "Starting NFS connector (connector_id=%s, mount=%s)",
         config.connector_id,

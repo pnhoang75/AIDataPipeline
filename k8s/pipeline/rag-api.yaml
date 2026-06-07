@@ -109,6 +109,8 @@ kind: Service
 metadata:
   name: rag-api
   namespace: ai-pipeline
+  labels:
+    app: rag-api
 spec:
   selector:
     app: rag-api
