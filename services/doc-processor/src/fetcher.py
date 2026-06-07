@@ -39,8 +39,12 @@ def _fetch_s3(content_ref: str, s3_client) -> bytes:
         raise FetchError(f"Invalid S3 ref: {content_ref}")
     bucket, key = parts
     try:
-        resp = s3_client.get_object(Bucket=bucket, Key=key)
-        return resp["Body"].read()
+        response = s3_client.get_object(bucket, key)
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
     except Exception as exc:
         raise FetchError(f"S3 fetch error: {exc}") from exc
 

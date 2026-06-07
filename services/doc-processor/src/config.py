@@ -18,5 +18,10 @@ class Config:
         "POSTGRES_DSN", "postgresql://pipeline:pipeline@localhost:5432/pipeline"
     )
 
+    minio_endpoint: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+    minio_access_key: str = os.getenv("MINIO_ACCESS_KEY", "minio")
+    minio_secret_key: str = os.getenv("MINIO_SECRET_KEY", "minio")
+    minio_secure: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
+
 
 config = Config()

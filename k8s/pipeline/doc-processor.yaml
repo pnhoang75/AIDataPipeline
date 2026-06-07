@@ -82,6 +82,20 @@ spec:
               value: "dlq-raw-documents"
             - name: KAFKA_CONSUMER_GROUP
               value: "doc-processor"
+            - name: MINIO_ENDPOINT
+              value: "minio.infrastructure.svc.cluster.local:80"
+            - name: MINIO_SECURE
+              value: "false"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: pipeline-secrets
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: pipeline-secrets
+                  key: MINIO_SECRET_KEY
           volumeMounts:
             - name: tmp
               mountPath: /tmp

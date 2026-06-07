@@ -1,6 +1,7 @@
 import logging
 
 from confluent_kafka import Consumer, Producer
+from minio import Minio
 
 from config import config
 from fetcher import fetch_content_with_retry
@@ -14,6 +15,16 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    minio_client = Minio(
+        config.minio_endpoint,
+        access_key=config.minio_access_key,
+        secret_key=config.minio_secret_key,
+        secure=config.minio_secure,
+    )
+
+    def _fetch(content_ref: str) -> bytes:
+        return fetch_content_with_retry(content_ref, s3_client=minio_client)
+
     consumer = Consumer(
         {
             "bootstrap.servers": config.kafka_bootstrap,
@@ -31,7 +42,7 @@ def main() -> None:
         consumer=consumer,
         producer=producer,
         dlq_producer=dlq_producer,
-        content_fetcher=fetch_content_with_retry,
+        content_fetcher=_fetch,
         cfg=config,
     )
 
