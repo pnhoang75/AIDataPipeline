@@ -48,8 +48,8 @@ SESSIONS_PROMPT_DIR="$REPO_ROOT/scripts/sessions"
 
 # ── Config ───────────────────────────────────────────────────────────────────
 RETRY_LIMIT=3                    # max retries for non-limit errors per session
-USAGE_LIMIT_SLEEP=19800          # 5h30m — safely past the 5h window reset
-USAGE_LIMIT_POLL=1800            # recheck every 30 min after limit hit
+USAGE_LIMIT_SLEEP=21600          # 6h hard cap — fallback if probing keeps failing
+USAGE_LIMIT_POLL=900             # probe Claude every 15 min after reset floor
 MAX_TURNS=200                    # max agentic turns per claude -p call
 CLAUDE_TIMEOUT=7200              # 2h wall-clock timeout per session (seconds)
 
@@ -276,21 +276,73 @@ commit_progress() {
     git commit -m "executor: $message" --allow-empty 2>/dev/null || true)
 }
 
-# ── Sleep with countdown ──────────────────────────────────────────────────────
-sleep_with_progress() {
-  local seconds="$1" reason="$2"
-  local end_time=$(( $(date +%s) + seconds ))
-  local interval=300  # report every 5 min
+# ── Smart limit-wait: parse reset time, then poll until Claude responds ───────
+wait_for_limit_reset() {
+  local output="$1"
 
-  warn "$reason"
-  warn "Sleeping $(( seconds / 3600 ))h $(( (seconds % 3600) / 60 ))m — will resume at $(date -d "@$end_time" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -r "$end_time" '+%Y-%m-%d %H:%M:%S')"
+  # Parse "resets HH:MMam/pm" from Claude's message to use as probe floor.
+  local time_str floor_epoch=0
+  time_str=$(echo "$output" \
+    | grep -oiE 'resets [0-9]+:[0-9]+(am|pm)' \
+    | head -1 \
+    | grep -oiE '[0-9]+:[0-9]+(am|pm)' \
+    | tr '[:lower:]' '[:upper:]' || true)
 
-  while [[ $(date +%s) -lt $end_time ]]; do
-    local remaining=$(( end_time - $(date +%s) ))
-    local hours=$(( remaining / 3600 ))
-    local mins=$(( (remaining % 3600) / 60 ))
-    log "Resuming in ${hours}h ${mins}m..."
-    sleep "$interval"
+  if [[ -n "$time_str" ]]; then
+    floor_epoch=$(date -j -f "%I:%M%p" "$time_str" "+%s" 2>/dev/null || echo 0)
+    local now_ts; now_ts=$(date +%s)
+    # If parsed time is already in the past, it means tomorrow.
+    [[ $floor_epoch -le $now_ts ]] && floor_epoch=$(( floor_epoch + 86400 ))
+    warn "Claude reports reset at ${time_str} — will start probing then ($(( (floor_epoch - now_ts) / 60 ))m away)."
+  else
+    warn "Could not parse reset time — will probe every $(( USAGE_LIMIT_POLL / 60 ))m."
+  fi
+
+  local deadline=$(( $(date +%s) + USAGE_LIMIT_SLEEP ))  # absolute hard cap
+
+  # First probe: at floor_epoch (parsed reset time) or 15 min from now, whichever is later.
+  local next_probe=$(( $(date +%s) + USAGE_LIMIT_POLL ))
+  [[ $floor_epoch -gt $next_probe ]] && next_probe=$floor_epoch
+
+  # Update progress with the expected reset time.
+  python3 - "$PROGRESS_FILE" \
+    "window_reset_at" "$(date -u -r "$next_probe" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date -u -d "@$next_probe" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo 'unknown')" <<'PYEOF'
+import sys, json
+f = sys.argv[1]
+with open(f) as fh:
+    data = json.load(fh)
+args = sys.argv[2:]
+for i in range(0, len(args), 2):
+    data[args[i]] = args[i+1]
+with open(f, 'w') as fh:
+    json.dump(data, fh, indent=2)
+PYEOF
+
+  while true; do
+    local now; now=$(date +%s)
+
+    if [[ $now -ge $deadline ]]; then
+      warn "Hard cap ($(( USAGE_LIMIT_SLEEP / 3600 ))h) reached — resuming regardless."
+      return 0
+    fi
+
+    local wait_secs=$(( next_probe - now ))
+    if [[ $wait_secs -gt 0 ]]; then
+      log "Limit active — probing in $(( wait_secs / 60 ))m $(( wait_secs % 60 ))s..."
+      sleep "$wait_secs"
+    fi
+
+    log "Probing Claude to check if limit has reset..."
+    local probe_out
+    probe_out=$(timeout 60 claude --max-turns 1 -p "Reply with the single word: ready" 2>&1 || true)
+
+    if is_usage_limit_error "$probe_out"; then
+      warn "Still rate-limited. Next probe in $(( USAGE_LIMIT_POLL / 60 ))m."
+      next_probe=$(( $(date +%s) + USAGE_LIMIT_POLL ))
+    else
+      ok "Claude limit cleared — resuming!"
+      return 0
+    fi
   done
 }
 
@@ -375,26 +427,20 @@ PYEOF
     # ── Usage limit? ──────────────────────────────────────────────────────────
     if is_usage_limit_error "$output"; then
       warn "Claude Pro usage limit detected on session ${session_id}."
-      python3 - "$PROGRESS_FILE" \
-        "status" "waiting_for_window_reset" \
-        "window_reset_at" "$(date -d "+${USAGE_LIMIT_SLEEP} seconds" -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v +${USAGE_LIMIT_SLEEP}S +%Y-%m-%dT%H:%M:%SZ)" <<'PYEOF'
+      python3 - "$PROGRESS_FILE" "status" "waiting_for_window_reset" <<'PYEOF'
 import sys, json
 f = sys.argv[1]
 with open(f) as fh:
     data = json.load(fh)
-args = sys.argv[2:]
-for i in range(0, len(args), 2):
-    data[args[i]] = args[i+1]
+data[sys.argv[2]] = sys.argv[3]
 with open(f, 'w') as fh:
     json.dump(data, fh, indent=2)
 PYEOF
       commit_progress "usage limit hit — waiting for window reset"
 
-      # Poll until the limit clears rather than sleeping a fixed duration
-      sleep_with_progress "$USAGE_LIMIT_SLEEP" "Waiting for Claude Pro window to reset..."
+      wait_for_limit_reset "$output"
 
-      # After sleeping, retry the same session (don't advance index)
-      log "Window should be reset. Retrying session ${session_id}..."
+      log "Retrying session ${session_id}..."
       continue
     fi
 
