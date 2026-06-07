@@ -462,7 +462,25 @@ PYEOF
       claude --allowedTools "$ALLOWED_TOOLS" \
              --max-turns "$MAX_TURNS" \
              -p "$prompt" \
-      2>&1 | tee "$logfile" > "$tmpout" || exit_code=$?
+      2>&1 | tee "$logfile" > "$tmpout" &
+    local pipe_pid=$!
+
+    # Watchdog: if log stays at 0 bytes for >20 min, kill and retry (silent API stall).
+    local stall_limit=1200
+    local stall_elapsed=0
+    while kill -0 "$pipe_pid" 2>/dev/null; do
+      sleep 15
+      stall_elapsed=$(( stall_elapsed + 15 ))
+      if [[ $(wc -c < "$logfile") -gt 0 ]]; then
+        stall_elapsed=0  # reset once output begins
+      elif [[ $stall_elapsed -ge $stall_limit ]]; then
+        warn "No output for ${stall_limit}s — killing stalled claude (silent API stall)."
+        kill "$pipe_pid" 2>/dev/null || true
+        exit_code=1
+        break
+      fi
+    done
+    wait "$pipe_pid" 2>/dev/null && exit_code=0 || exit_code=${exit_code:-$?}
 
     local output
     output=$(cat "$tmpout")
