@@ -1,12 +1,12 @@
 {
   "current_index": 15,
   "current_session": "2-A",
-  "status": "waiting_for_window_reset",
+  "status": "running",
   "last_completed": "1-J",
   "last_completed_at": "2026-06-07T18:06:19Z",
-  "last_attempt_at": "2026-06-07T18:06:20Z",
+  "last_attempt_at": "2026-06-07T22:01:40Z",
   "window_started_at": "2026-06-06T00:00:00Z",
-  "window_reset_at": "2026-06-07T15:30:51Z",
+  "window_reset_at": "2026-06-07T20:30:49Z",
   "retry_count": 0,
   "sessions_completed": [
     "0-A",
