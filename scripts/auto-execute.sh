@@ -476,6 +476,9 @@ PYEOF
       elif [[ $stall_elapsed -ge $stall_limit ]]; then
         warn "No output for ${stall_limit}s — killing stalled claude (silent API stall)."
         kill "$pipe_pid" 2>/dev/null || true
+        # Bash 3.2: wait on a pipeline PID blocks until ALL pipeline members exit.
+        # Must kill claude (left side) too so the wait below returns immediately.
+        pkill -f "claude.*allowedTools" 2>/dev/null || true
         exit_code=1
         break
       fi
