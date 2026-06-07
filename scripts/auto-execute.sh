@@ -64,12 +64,15 @@ ALLOWED_TOOLS="Bash,Read,Write,Edit,Glob,Grep,LS"
 # Usage-limit error patterns (case-insensitive grep)
 USAGE_LIMIT_PATTERNS=(
   "usage limit"
+  "session limit"
   "rate limit"
   "claude pro limit"
   "you've reached your limit"
+  "you've hit your"
   "exceeded.*limit"
   "too many requests"
   "quota exceeded"
+  "resets.*[0-9]:[0-9][0-9]"
 )
 
 # ── Colours ──────────────────────────────────────────────────────────────────
