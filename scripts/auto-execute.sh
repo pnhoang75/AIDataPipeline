@@ -415,6 +415,10 @@ PYEOF
   local attempt=0
   while true; do
     attempt=$(( attempt + 1 ))
+    # Kill any orphaned tee/claude from a previous attempt before starting fresh.
+    pkill -f "tee.*${session_id}\.log" 2>/dev/null || true
+    pkill -f "claude.*session ${session_id}" 2>/dev/null || true
+    sleep 1
     log "Attempt ${attempt} for session ${session_id}..."
 
     local tmpout; tmpout=$(mktemp)
