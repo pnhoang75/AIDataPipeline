@@ -61,6 +61,19 @@ def main() -> None:
                 count += 1
             logger.info("Poll complete: %d events published", count)
             backoff_multiplier = 1.0
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+            logger.warning("DB connection lost (%s); reconnecting", exc)
+            try:
+                db_conn.close()
+            except Exception:
+                pass
+            try:
+                db_conn = build_db_conn()
+                connector._db = db_conn
+                logger.info("DB reconnected")
+            except Exception as reconn_exc:
+                logger.error("DB reconnect failed: %s", reconn_exc)
+                backoff_multiplier = min(backoff_multiplier * 2, 10.0)
         except Exception as exc:
             logger.error("Poll failed: %s", exc, exc_info=True)
             backoff_multiplier = min(backoff_multiplier * 2, 10.0)
