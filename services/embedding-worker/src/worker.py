@@ -29,6 +29,7 @@ class EmbeddingWorker:
         self._dlq_producer = dlq_producer
         self._db_conn = db_conn
         self._cfg = cfg
+        self._running = False
 
     def _send_to_dlq(
         self, msg, chunk: DocumentChunkEvent, reason: str, detail: str
@@ -162,9 +163,13 @@ class EmbeddingWorker:
 
         return batch
 
+    def stop(self) -> None:
+        self._running = False
+
     def run(self) -> None:
+        self._running = True
         logger.info("EmbeddingWorker starting")
-        while True:
+        while self._running:
             batch = self._collect_batch()
             if batch:
                 self._process_batch(batch)
