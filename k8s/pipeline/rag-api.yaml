@@ -43,7 +43,7 @@ spec:
               name: http
           env:
             - name: MILVUS_HOST
-              value: "milvus.infrastructure.svc.cluster.local"
+              value: "milvus-milvus.infrastructure.svc.cluster.local"
             - name: MILVUS_PORT
               value: "19530"
             - name: REDIS_HOST

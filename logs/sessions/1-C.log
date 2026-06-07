@@ -1,0 +1,15 @@
+Session 1-C is complete. Here's what was done:
+
+**Implemented `services/connector-nfs/`:**
+- `connector.py` — `NFSConnector` extending `SourceConnector` ABC; uses `watchdog` Observer for real-time inotify events queued in-process; falls back to Redis-backed tree-diff when the observer is not alive; Kafka publish with exponential retry (same pattern as S3); marks files as known in Redis only after successful publish
+- `config.py` — NFS-specific config (`NFS_MOUNT_PATH`, `ALLOWED_EXTENSIONS`), plus shared Kafka/Redis/Postgres settings
+- `events.py`, `status.py` — same `RawDocumentEvent` schema and `source_file_status` write as the S3 connector
+
+**9 unit tests in `tests/unit/connectors/test_nfs_connector.py`** — all passing:
+- Inotify path: file queued → event emitted, sadd called, Kafka produce called
+- Tree-diff fallback: observer dead → new files found via `os.walk`; known files skipped; disallowed extensions skipped
+- Disallowed extension from queue: filtered in `_make_event`
+- Kafka retry: succeeds on 3rd attempt
+- Max retries exceeded: counter incremented, sadd not called
+- Event schema round-trip: JSON serialisation/deserialisation
+- Multiple files: 3 events emitted from 3 queued paths

@@ -1,0 +1,11 @@
+Session 1-E is complete. Here's a summary of what was done:
+
+**Created:** `tests/integration/test_connector_kafka.py` with 3 passing tests:
+
+1. **`test_happy_path_pdf`** — Uploads a valid PDF (generated with fpdf2) to MinIO, runs `S3Connector.poll()` to publish a `RawDocumentEvent` to the `raw-documents` Kafka topic, then runs `DocumentProcessor` in a background thread and drains `document-chunks` to assert at least one chunk is published with correct `source_id`, `content_type`, and non-empty `text`.
+
+2. **`test_corrupt_pdf_routed_to_dlq`** — Uploads corrupt bytes (a non-PDF file with `.pdf` extension) to MinIO, runs the connector, runs the processor, and asserts a `DLQEnvelope` with `failure_reason="parse_error"` appears on `dlq-raw-documents`.
+
+3. **`test_watermark_prevents_duplicates`** — Uploads a PDF, polls the connector once (gets 1 event, watermark set), polls again with the same connector instance (gets 0 events — watermark filters the file out).
+
+**Infrastructure used:** testcontainers for real Kafka, MinIO, Redis, and PostgreSQL containers. A conftest.py fixture overrides `DOCKER_CONFIG` to bypass the `docker-credential-desktop` symlink issue on macOS Docker Desktop.

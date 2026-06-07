@@ -1,0 +1,9 @@
+Session 1-F is complete. Here's a summary of what was built:
+
+**Files created/modified:**
+- `services/embedding-worker/src/backends.py` — renamed `embed` → `embed_batch` throughout; added `RateLimitError` exception class for rate-limit handling
+- `services/embedding-worker/src/worker.py` — `EmbeddingWorker` with `_collect_batch()` (32 chunks or 500ms timeout), `_process_batch()` (embed → Milvus upsert → publish events → update Postgres → commit offsets; DLQ routing on any failure with 1 retry for embedding errors)
+- `services/embedding-worker/src/status_updater.py` — `update_source_file_status()` for Postgres `source_file_status` table writes
+- `tests/unit/embedder/__init__.py` + `test_embedder.py` — 19 unit tests covering all 8 test plan cases plus supporting tests (happy path, DLQ routing, rate limiting, batch accumulation, backend selection)
+
+**Done-check result:** 19 passed in 0.20s.

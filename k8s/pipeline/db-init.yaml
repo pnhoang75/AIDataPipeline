@@ -1,4 +1,25 @@
 ---
+# Allow db-init job to reach PostgreSQL in the infrastructure namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-init
+  namespace: ai-pipeline
+spec:
+  podSelector:
+    matchLabels:
+      job-name: db-init
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+      ports:
+        - port: 5432
+          protocol: TCP
+---
 # One-shot Job that creates the source_file_status table in quota-db.
 apiVersion: batch/v1
 kind: Job

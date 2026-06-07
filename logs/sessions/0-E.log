@@ -1,0 +1,15 @@
+Session 0-E is complete.
+
+**Done-check result:**
+```
+NAME                SYNC STATUS   HEALTH STATUS
+ai-pipeline-infra   Synced        Healthy
+```
+
+**What was fixed in this session:**
+- Added `allow-redis-operator` NetworkPolicy so the redis-operator (in its own namespace) could reach Redis/Sentinel pods in `infrastructure` — this unblocked master election and got Redis ready (1/1)
+- Added `allow-minio-operator` NetworkPolicy so the MinIO operator could provision the 3 buckets (`pipeline-backups`, `opa-bundles`, `pipeline-artifacts`)
+- Fixed CNPG backup `endpointURL` from port `9000` to `80` to match the MinIO service port
+- Triggered ArgoCD sync to the new commit; ArgoCD reconciled all resources to Synced/Healthy
+
+Sentinel `.sessions-done/0-E` created and pushed.

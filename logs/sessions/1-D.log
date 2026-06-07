@@ -1,0 +1,13 @@
+Session 1-D is complete. Here's what was implemented:
+
+**`services/doc-processor/`** — full Document Processor service:
+- `src/config.py` — Config with Kafka, chunker, and Postgres settings
+- `src/events.py` — `RawDocumentEvent`, `DocumentChunkEvent`, `DLQEnvelope` dataclasses
+- `src/parsers.py` — parser dispatch by MIME type: pdfplumber (PDF), python-docx (DOCX), BeautifulSoup4+html2text (HTML), pandas (CSV), built-in (JSON/text); all optional imports patchable by tests
+- `src/chunker.py` — `FixedSizeChunker` using tiktoken `cl100k_base`, 512-token chunks / 64-token overlap, lazy encoding init
+- `src/fetcher.py` — content fetcher with 3× retry (1s→4s→16s backoff) for S3/file/inline refs
+- `src/status.py` — `update_source_file_status` DB helper
+- `src/processor.py` — `DocumentProcessor` with manual-commit Kafka consumer; parse failure → DLQ + commit offset; chunk publish failure → DLQ + **no commit** (redelivery)
+- `src/main.py` — entry point
+
+**`tests/unit/processor/`** — 38 tests covering all parsers, chunker, and critical offset-commit semantics. All pass.

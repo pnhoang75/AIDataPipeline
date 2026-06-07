@@ -1,0 +1,10 @@
+Session 1-G is complete. Here's a summary of what was done:
+
+**Changes made:**
+1. **`services/embedding-worker/src/milvus_writer.py`** — Refactored to use `chunk_id` as the VARCHAR primary key (enabling true idempotent upserts) and added a `uri` parameter for Milvus Lite support in tests. The `upsert()` method now calls `Collection.upsert()` instead of `insert()`, preventing duplicate entries for re-delivered chunks.
+
+2. **`services/embedding-worker/src/worker.py`** — Added `stop()` method and `_running` flag to allow clean shutdown from integration test threads.
+
+3. **`tests/integration/test_embedder_milvus.py`** — New integration test file with 4 tests covering all scenarios from the test plan: vector written to Milvus, idempotent upsert (same `chunk_id` → 1 entity), embedding timeout → DLQ routing, and PostgreSQL status updated to `indexed`. Uses Kafka testcontainers + Postgres testcontainers + Milvus Lite (embedded, no Docker image needed). Each test uses explicit Kafka offset assignment for clean test isolation.
+
+**All 4 integration tests pass** (done-check: `pytest tests/integration/test_embedder_milvus.py -x --tb=short -q` → 4 passed in ~80s).

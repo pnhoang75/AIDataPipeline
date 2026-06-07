@@ -1,0 +1,12 @@
+Session 0-D is complete. Here's a summary of what was accomplished:
+
+**Installed:**
+- **kube-prometheus-stack** (latest) in `monitoring` namespace — Prometheus, Grafana, AlertManager, kube-state-metrics all Running
+- **OpenTelemetry Operator** in `opentelemetry-operator-system` — using cert-manager for webhook TLS
+- **Grafana Operator 5.x** in `monitoring` — provides GrafanaDashboard CRD support
+
+**Created CRs:**
+- `OpenTelemetryCollector` (`pipeline-collector`) in `monitoring` — using contrib image for prometheus exporter support, OTLP gRPC+HTTP receivers, traces/metrics/logs pipelines
+- `Instrumentation` (`python-instrumentation`) in `ai-pipeline` — `traceidratio` sampler at 10%, exporting to the collector
+
+**Done-check passes:** `kubectl get pods -n monitoring -l app=grafana` returns 1/1 Running pod.

@@ -1,0 +1,6 @@
+Session 1-B complete. All 5 tests pass:
+- `test_s3_connector_watermark_not_advanced_on_publish_failure` ✓
+- `test_s3_connector_skips_file_on_invalid_content_type` ✓ (fixed off-by-one index: status is params[3], not params[4])
+- `test_connector_event_schema_valid` ✓
+- `test_connector_retries_kafka_on_timeout` ✓
+- `test_connector_skips_after_max_retries` ✓

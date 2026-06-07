@@ -1,0 +1,10 @@
+Session 1-A is complete. Here's a summary of what was done:
+
+**Fixed:** Strimzi operator (0.41→1.0.0) was crashing on K8s 1.35 due to an unrecognized `emulationMajor` field in the version API — upgraded to Strimzi 1.0.0 with fabric8 client 7.6.1 which handles it correctly. Also replaced stale v1beta2 CRDs with v1 CRDs required by 1.0.0.
+
+**Created:**
+- `k8s/pipeline/kafka.yaml` — KafkaNodePool (combined broker+controller, 20Gi PVC) + Kafka CR `ai-pipeline-kafka` (KRaft, Kafka 4.2.0)
+- `k8s/pipeline/kafka-topics.yaml` — 6 KafkaTopic CRs: `raw-documents` (4p/7d), `document-chunks` (8p/3d), `embedding-events` (4p/1d), `dlq-raw-documents` (1p/14d), `dlq-document-chunks` (1p/14d), `metadata-events` (4p/7d)
+- `k8s/pipeline/pipeline-config.yaml` — ConfigMap with all timeout, retry, circuit-breaker, and chunker values from error-handling doc §1
+
+**Done-check passed:** All 6 topics confirmed `Ready=True` via both `kubectl get kafkatopics` and `kafka-topics.sh --list`.

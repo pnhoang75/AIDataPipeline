@@ -1,0 +1,13 @@
+Session 0-C is complete. Here's what was accomplished:
+
+1. **Installed OPA Gatekeeper 3.16** via Helm in the `gatekeeper-system` namespace with `failurePolicy: Ignore` on both validating and mutating webhooks (safe for testbed).
+
+2. **Created 4 ConstraintTemplates** (`k8s/operators/gatekeeper/constraint-templates.yaml`):
+   - `K8sRequireNonRootUser` — flags containers without `runAsNonRoot: true` or `runAsUser > 0`
+   - `K8sRequireReadOnlyRootFS` — flags containers without `readOnlyRootFilesystem: true`
+   - `K8sRequireResourceLimits` — flags containers missing CPU or memory limits
+   - `K8sBlockLatestImageTag` — flags containers using `:latest` or untagged images
+
+3. **Created 4 Constraints** (`k8s/operators/gatekeeper/constraints.yaml`) scoped to the `ai-pipeline` namespace with `enforcementAction: warn` (non-blocking for testbed).
+
+4. **Verified warnings work**: A pod without resource limits in `ai-pipeline` namespace was created with Gatekeeper warnings: `[require-resource-limits] container <test> must set resources.limits.cpu/memory`.

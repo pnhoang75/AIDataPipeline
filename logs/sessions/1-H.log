@@ -1,0 +1,10 @@
+Session 1-H is complete. Here's a summary of what was built:
+
+**`services/rag-api/`** — FastAPI service with:
+- `circuit_breaker.py` — Custom `CircuitBreaker` class (failure_threshold=5, recovery_timeout=30s, CLOSED→OPEN→HALF_OPEN states)
+- `config.py` — Environment-driven configuration
+- `models.py` — Pydantic v2 models (`QueryRequest`, `QueryResult`, `QueryResponse`)
+- `app.py` — `RagService` (cache → embed → Milvus ANN search → filter) and FastAPI routes (`POST /v1/query`, `GET /v1/health`, `GET /v1/collections`)
+
+**`tests/unit/rag/test_rag_api.py`** — All 10 tests from §2.4 passing:
+- top_k enforcement, cache hit/miss/store (TTL=300s), Redis graceful degradation, tenant-derived collection, body `collection` field ignored, circuit breaker opens after 5 failures, half-open probe after 30s, source_filter forwarding, min_score filtering.
