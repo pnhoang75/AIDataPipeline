@@ -431,7 +431,7 @@ PYEOF
     # If the limit is already active, wait it out now rather than burning
     # the attempt with a silent 0-byte stall.
     local probe_out
-    probe_out=$(claude --max-turns 1 -p "Reply with the word ready" 2>&1 || true)
+    probe_out=$(timeout 90 claude --max-turns 1 -p "Reply with the word ready" 2>&1 || true)
     if is_usage_limit_error "$probe_out"; then
       warn "Pre-flight probe: limit active before attempt ${attempt}. Waiting..."
       python3 - "$PROGRESS_FILE" "status" "waiting_for_window_reset" <<'PYEOF'
