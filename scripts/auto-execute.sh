@@ -479,7 +479,14 @@ PYEOF
     local stall_limit=1200
     local captured_pipe_pid="$pipe_pid"
     (
-      sleep "$stall_limit"
+      # Sleep in 60s chunks so Mac suspend doesn't stall the watchdog timer.
+      local deadline=$(( $(date +%s) + stall_limit ))
+      while [[ $(date +%s) -lt $deadline ]]; do
+        local chunk=$(( deadline - $(date +%s) ))
+        [[ $chunk -gt 60 ]] && chunk=60
+        [[ $chunk -le 0 ]] && break
+        sleep "$chunk"
+      done
       if [[ $(wc -c < "$logfile") -eq 0 ]]; then
         echo "[watchdog] No output for ${stall_limit}s — killing stalled pipeline." >&2
         kill "$captured_pipe_pid" 2>/dev/null || true
