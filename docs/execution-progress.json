@@ -4,7 +4,7 @@
   "status": "running",
   "last_completed": "1-J",
   "last_completed_at": "2026-06-07T18:06:19Z",
-  "last_attempt_at": "2026-06-08T02:33:15Z",
+  "last_attempt_at": "2026-06-08T03:30:20Z",
   "window_started_at": "2026-06-06T00:00:00Z",
   "window_reset_at": "2026-06-08T01:30:57Z",
   "retry_count": 0,
