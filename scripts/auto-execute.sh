@@ -340,7 +340,14 @@ PYEOF
     local wait_secs=$(( next_probe - now ))
     if [[ $wait_secs -gt 0 ]]; then
       log "Limit active — probing in $(( wait_secs / 60 ))m $(( wait_secs % 60 ))s..."
-      sleep "$wait_secs"
+      # Sleep in 60s chunks so Mac suspend doesn't leave us stuck for hours.
+      local remaining=$wait_secs
+      while [[ $remaining -gt 0 ]]; do
+        local chunk=$(( remaining < 60 ? remaining : 60 ))
+        sleep "$chunk"
+        remaining=$(( next_probe - $(date +%s) ))
+        [[ $remaining -lt 0 ]] && remaining=0
+      done
     fi
 
     log "Probing Claude to check if limit has reset..."
