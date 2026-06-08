@@ -1,0 +1,32 @@
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  instances: 1
+  image: quay.io/keycloak/keycloak:24.0.5
+  features:
+    enabled:
+      - preview
+  db:
+    vendor: dev-file
+  http:
+    httpEnabled: true
+    httpPort: 8080
+  hostname:
+    hostname: localhost
+    strict: false
+    strictBackchannel: false
+  resources:
+    requests:
+      memory: "768Mi"
+      cpu: "250m"
+    limits:
+      memory: "1536Mi"
+      cpu: "1000m"
+  additionalOptions:
+    - name: health-enabled
+      value: "true"
+    - name: legacy-observability-interface
+      value: "true"

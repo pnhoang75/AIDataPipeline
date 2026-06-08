@@ -1,0 +1,179 @@
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: KeycloakRealmImport
+metadata:
+  name: ai-pipeline-realm
+  namespace: keycloak
+spec:
+  keycloakCRName: keycloak
+  realm:
+    realm: ai-pipeline
+    displayName: "AI Data Pipeline"
+    enabled: true
+    registrationAllowed: false
+    resetPasswordAllowed: false
+    loginWithEmailAllowed: true
+    duplicateEmailsAllowed: false
+    roles:
+      realm:
+        - name: pipeline-admin
+          description: "Pipeline administrator — full access"
+        - name: pipeline-user
+          description: "Pipeline user — workspace and query access"
+        - name: pipeline-viewer
+          description: "Pipeline viewer — read-only access"
+    clients:
+      - clientId: spa-client
+        name: "SPA Client (PKCE)"
+        description: "Public client for the React SPA — uses PKCE, implicit flow disabled"
+        enabled: true
+        publicClient: true
+        standardFlowEnabled: true
+        implicitFlowEnabled: false
+        directAccessGrantsEnabled: false
+        serviceAccountsEnabled: false
+        redirectUris:
+          - "http://localhost:3000/*"
+          - "http://localhost:8000/*"
+          - "http://localhost/*"
+        webOrigins:
+          - "http://localhost:3000"
+          - "http://localhost:8000"
+          - "http://localhost"
+        attributes:
+          pkce.code.challenge.method: "S256"
+          login_theme: ""
+        protocolMappers:
+          - name: org_id-mapper
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            consentRequired: false
+            config:
+              user.attribute: org_id
+              claim.name: org_id
+              jsonType.label: String
+              id.token.claim: "true"
+              access.token.claim: "true"
+              userinfo.token.claim: "true"
+              multivalued: "false"
+          - name: org_name-mapper
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            consentRequired: false
+            config:
+              user.attribute: org_name
+              claim.name: org_name
+              jsonType.label: String
+              id.token.claim: "true"
+              access.token.claim: "true"
+              userinfo.token.claim: "true"
+              multivalued: "false"
+          - name: license_type-mapper
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            consentRequired: false
+            config:
+              user.attribute: license_type
+              claim.name: license_type
+              jsonType.label: String
+              id.token.claim: "true"
+              access.token.claim: "true"
+              userinfo.token.claim: "true"
+              multivalued: "false"
+          - name: quota_tier-mapper
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            consentRequired: false
+            config:
+              user.attribute: quota_tier
+              claim.name: quota_tier
+              jsonType.label: String
+              id.token.claim: "true"
+              access.token.claim: "true"
+              userinfo.token.claim: "true"
+              multivalued: "false"
+          - name: roles-mapper
+            protocol: openid-connect
+            protocolMapper: oidc-realm-role-mapper
+            consentRequired: false
+            config:
+              id.token.claim: "true"
+              access.token.claim: "true"
+              claim.name: roles
+              jsonType.label: String
+              multivalued: "true"
+              userinfo.token.claim: "true"
+      - clientId: bff-client
+        name: "BFF Client (confidential)"
+        description: "Confidential client for the Backend-for-Frontend service"
+        enabled: true
+        publicClient: false
+        standardFlowEnabled: true
+        implicitFlowEnabled: false
+        directAccessGrantsEnabled: true
+        serviceAccountsEnabled: true
+        redirectUris:
+          - "http://localhost:8000/*"
+          - "http://bff.ai-pipeline.svc.cluster.local/*"
+        webOrigins:
+          - "+"
+        secret: "bff-client-secret-2026"
+        protocolMappers:
+          - name: org_id-mapper
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            consentRequired: false
+            config:
+              user.attribute: org_id
+              claim.name: org_id
+              jsonType.label: String
+              id.token.claim: "true"
+              access.token.claim: "true"
+              userinfo.token.claim: "true"
+              multivalued: "false"
+          - name: org_name-mapper
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            consentRequired: false
+            config:
+              user.attribute: org_name
+              claim.name: org_name
+              jsonType.label: String
+              id.token.claim: "true"
+              access.token.claim: "true"
+              userinfo.token.claim: "true"
+              multivalued: "false"
+          - name: license_type-mapper
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            consentRequired: false
+            config:
+              user.attribute: license_type
+              claim.name: license_type
+              jsonType.label: String
+              id.token.claim: "true"
+              access.token.claim: "true"
+              userinfo.token.claim: "true"
+              multivalued: "false"
+          - name: quota_tier-mapper
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            consentRequired: false
+            config:
+              user.attribute: quota_tier
+              claim.name: quota_tier
+              jsonType.label: String
+              id.token.claim: "true"
+              access.token.claim: "true"
+              userinfo.token.claim: "true"
+              multivalued: "false"
+          - name: roles-mapper
+            protocol: openid-connect
+            protocolMapper: oidc-realm-role-mapper
+            consentRequired: false
+            config:
+              id.token.claim: "true"
+              access.token.claim: "true"
+              claim.name: roles
+              jsonType.label: String
+              multivalued: "true"
+              userinfo.token.claim: "true"

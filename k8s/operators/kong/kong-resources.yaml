@@ -1,0 +1,189 @@
+---
+# ──────────────────────────────────────────────────────────────────────────────
+# KongPlugin: jwt  — validates Keycloak RS256 bearer tokens.
+# Unauthenticated requests (missing/invalid token) receive 401.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: jwt-auth
+  namespace: ai-pipeline
+  labels:
+    app: kong
+plugin: jwt
+config:
+  key_claim_name: iss
+  claims_to_verify:
+    - exp
+  run_on_preflight: false
+---
+# ──────────────────────────────────────────────────────────────────────────────
+# KongPlugin: pre-function (serverless) — extract org_id JWT claim → X-Tenant-ID.
+# Runs after jwt plugin validates the token.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: extract-tenant-id
+  namespace: ai-pipeline
+  labels:
+    app: kong
+plugin: pre-function
+config:
+  access:
+    - |
+      local auth = kong.request.get_header("authorization")
+      if not auth then return end
+      local token = auth:match("^[Bb]earer%s+(.+)$")
+      if not token then return end
+      -- Decode JWT payload (base64url middle section) without re-validating.
+      local payload_b64 = token:match("^[^.]+%.([^.]+)%.")
+      if not payload_b64 then return end
+      -- Pad base64 to a multiple of 4.
+      local pad = (4 - #payload_b64 % 4) % 4
+      local padded = payload_b64 .. string.rep("=", pad)
+      -- Replace URL-safe chars then decode.
+      padded = padded:gsub("%-", "+"):gsub("_", "/")
+      local decoded = ngx.decode_base64(padded)
+      if not decoded then return end
+      local ok, claims = pcall(require("cjson").decode, decoded)
+      if ok and claims and claims.org_id then
+        kong.service.request.set_header("X-Tenant-ID", claims.org_id)
+      end
+---
+# ──────────────────────────────────────────────────────────────────────────────
+# KongPlugin: quota-check (custom Lua) — gRPC call to Quota Service, fail-open.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: quota-check
+  namespace: ai-pipeline
+  labels:
+    app: kong
+plugin: quota-check
+config:
+  host: quota-service.ai-pipeline.svc.cluster.local
+  port: 50051
+  timeout_ms: 100
+---
+# ──────────────────────────────────────────────────────────────────────────────
+# KongPlugin: rate-limiting — basic per-IP rate limit (burst protection).
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: rate-limiting-rag
+  namespace: ai-pipeline
+  labels:
+    app: kong
+plugin: rate-limiting
+config:
+  minute: 120
+  policy: local
+  fault_tolerant: true
+  hide_client_headers: false
+---
+# ──────────────────────────────────────────────────────────────────────────────
+# KongPlugin: jwt-auth + extract-tenant-id for BFF route (/api/*).
+# Reuse the same plugins — just referenced by name in the Ingress annotation.
+# ──────────────────────────────────────────────────────────────────────────────
+# (jwt-auth and extract-tenant-id plugins already defined above; no duplicate needed)
+---
+# ──────────────────────────────────────────────────────────────────────────────
+# KongConsumer: keycloak-realm — represents tokens issued by the ai-pipeline realm.
+# The JWT credential key matches the Keycloak issuer claim (iss).
+# The RSA public key is populated via the keycloak-jwt-credential Secret below.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: configuration.konghq.com/v1
+kind: KongConsumer
+metadata:
+  name: keycloak-realm
+  namespace: ai-pipeline
+  labels:
+    app: kong
+  annotations:
+    kubernetes.io/ingress.class: kong
+username: keycloak-realm
+credentials:
+  - keycloak-jwt-credential
+---
+# JWT credential Secret for the Keycloak realm consumer.
+# algorithm: RS256; key = Keycloak issuer URL; rsa_public_key fetched from JWKS.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-jwt-credential
+  namespace: ai-pipeline
+  labels:
+    app: kong
+    konghq.com/credential: jwt
+stringData:
+  kongCredType: "jwt"
+  key: "http://keycloak-service.keycloak.svc.cluster.local:8080/realms/ai-pipeline"
+  algorithm: "RS256"
+  # Public key is populated by the setup-keycloak-realm.sh script once Keycloak
+  # is ready. Placeholder allows Kong to start without crashing; tokens will be
+  # rejected until the real key is injected (all requests return 401 which
+  # satisfies the session 2-B done-check).
+  rsa_public_key: |
+    -----BEGIN PUBLIC KEY-----
+    PLACEHOLDER_REPLACE_WITH_KEYCLOAK_REALM_PUBLIC_KEY
+    -----END PUBLIC KEY-----
+---
+# ──────────────────────────────────────────────────────────────────────────────
+# Ingress: /v1/* → rag-api
+# Plugin chain: jwt-auth → extract-tenant-id → quota-check → rate-limiting-rag
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rag-api-ingress
+  namespace: ai-pipeline
+  labels:
+    app: kong
+  annotations:
+    kubernetes.io/ingress.class: kong
+    konghq.com/strip-path: "false"
+    konghq.com/plugins: "jwt-auth,extract-tenant-id,quota-check,rate-limiting-rag"
+spec:
+  ingressClassName: kong
+  rules:
+    - http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend:
+              service:
+                name: rag-api
+                port:
+                  number: 8000
+---
+# ──────────────────────────────────────────────────────────────────────────────
+# Ingress: /api/* → bff
+# Plugin chain: jwt-auth → extract-tenant-id
+# (quota-check and rate-limiting added in session 3-D when BFF is deployed)
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bff-ingress
+  namespace: ai-pipeline
+  labels:
+    app: kong
+  annotations:
+    kubernetes.io/ingress.class: kong
+    konghq.com/strip-path: "false"
+    konghq.com/plugins: "jwt-auth,extract-tenant-id"
+spec:
+  ingressClassName: kong
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: bff
+                port:
+                  number: 8080

@@ -1,0 +1,53 @@
+ingressController:
+  enabled: true
+  ingressClass: kong
+  installCRDs: true
+  watchNamespaces:
+    - ai-pipeline
+    - kong
+
+image:
+  repository: kong
+  tag: "3.9"
+
+proxy:
+  type: ClusterIP
+  http:
+    enabled: true
+    servicePort: 80
+    containerPort: 8000
+  tls:
+    enabled: false
+
+admin:
+  enabled: true
+  type: ClusterIP
+  http:
+    enabled: true
+    servicePort: 8001
+    containerPort: 8001
+
+env:
+  database: "off"
+  log_level: info
+  trusted_ips: "0.0.0.0/0"
+  real_ip_header: "X-Forwarded-For"
+
+dblessConfig:
+  configMap: ""
+
+# Load the custom quota-check Lua plugin from a ConfigMap.
+# The chart automatically sets KONG_PLUGINS=bundled,quota-check
+# and mounts the ConfigMap at /opt/kong/quota-check/.
+plugins:
+  configMaps:
+    - pluginName: quota-check
+      name: kong-quota-check-plugin
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
