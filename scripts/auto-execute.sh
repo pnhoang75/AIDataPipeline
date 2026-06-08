@@ -47,7 +47,7 @@ LOG_DIR="$REPO_ROOT/logs/sessions"
 SESSIONS_PROMPT_DIR="$REPO_ROOT/scripts/sessions"
 
 # ── Config ───────────────────────────────────────────────────────────────────
-RETRY_LIMIT=3                    # max retries for non-limit errors per session
+RETRY_LIMIT=10                   # max retries for non-limit errors per session
 USAGE_LIMIT_SLEEP=21600          # 6h hard cap — fallback if probing keeps failing
 USAGE_LIMIT_POLL=900             # probe Claude every 15 min after reset floor
 MAX_TURNS=200                    # max agentic turns per claude -p call
@@ -472,25 +472,25 @@ PYEOF
       2>&1 | tee "$logfile" > "$tmpout" &
     local pipe_pid=$!
 
-    # Watchdog: if log stays at 0 bytes for >20 min, kill and retry (silent API stall).
+    # Stall watchdog: independent background process kills the pipeline after
+    # STALL_LIMIT seconds if it still hasn't produced any output.
+    # Simpler and more reliable than the inline polling loop (avoids Bash 3.2
+    # variable-scoping and set -e quirks that prevented the old loop from firing).
     local stall_limit=1200
-    local stall_elapsed=0
-    while kill -0 "$pipe_pid" 2>/dev/null; do
-      sleep 15
-      stall_elapsed=$(( stall_elapsed + 15 ))
-      if [[ $(wc -c < "$logfile") -gt 0 ]]; then
-        stall_elapsed=0  # reset once output begins
-      elif [[ $stall_elapsed -ge $stall_limit ]]; then
-        warn "No output for ${stall_limit}s — killing stalled claude (silent API stall)."
-        kill "$pipe_pid" 2>/dev/null || true
-        # Bash 3.2: wait on a pipeline PID blocks until ALL pipeline members exit.
-        # Must kill claude (left side) too so the wait below returns immediately.
+    local captured_pipe_pid="$pipe_pid"
+    (
+      sleep "$stall_limit"
+      if [[ $(wc -c < "$logfile") -eq 0 ]]; then
+        echo "[watchdog] No output for ${stall_limit}s — killing stalled pipeline." >&2
+        kill "$captured_pipe_pid" 2>/dev/null || true
         pkill -f "claude.*allowedTools" 2>/dev/null || true
-        exit_code=1
-        break
       fi
-    done
-    wait "$pipe_pid" 2>/dev/null && exit_code=0 || exit_code=${exit_code:-$?}
+    ) &
+    local watchdog_pid=$!
+
+    wait "$pipe_pid" 2>/dev/null && exit_code=0 || exit_code=$?
+    kill "$watchdog_pid" 2>/dev/null || true   # cancel watchdog if claude finished normally
+    wait "$watchdog_pid" 2>/dev/null || true
 
     local output
     output=$(cat "$tmpout")
