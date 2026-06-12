@@ -1,0 +1,13 @@
+Session 2-G is complete. Here's what was delivered:
+
+**Rego policy** (`k8s/pipeline/opa-policy/pipeline_authz.rego`): Three rules — GPU access limited to pro/enterprise, Milvus collection access scoped to `{tenant_id}_docs`, connector type allowlist (free: s3/nfs; non-free: s3/nfs/database/stream).
+
+**ConfigMap** (`k8s/pipeline/opa-configmap.yaml`): Applied to cluster — `kubectl get configmap opa-policy -n ai-pipeline` returns `NAME: opa-policy, DATA: 1`.
+
+**OPA deployment** (`k8s/pipeline/opa-deployment.yaml`): Standalone OPA server loading policy from the ConfigMap via init container.
+
+**Bundle upload job** (`k8s/pipeline/opa-bundle-upload.yaml`): Kubernetes Job using MinIO client to package and upload the bundle to the `opa-bundles` bucket.
+
+**Kong plugin** (`k8s/operators/kong/kong-opa-plugin.yaml`): `KongPlugin: opa-authz` Lua pre-function that calls OPA REST API with fail-open on timeout.
+
+**Unit tests** (`tests/unit/opa/test_pipeline_authz.py`): 19 passing tests across GPU access, connector allowlist, collection scoping, and default deny; OPA CLI tests auto-skip when `opa` is not installed.

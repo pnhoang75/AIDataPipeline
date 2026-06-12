@@ -59,21 +59,6 @@ spec:
                 configMapKeyRef:
                   name: pipeline-config
                   key: REDIS_OP_TIMEOUT_MS
-            - name: MINIO_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: pipeline-secrets
-                  key: MINIO_ACCESS_KEY
-            - name: MINIO_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: pipeline-secrets
-                  key: MINIO_SECRET_KEY
-            - name: POSTGRES_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: pipeline-secrets
-                  key: POSTGRES_DSN
             - name: MINIO_ENDPOINT
               value: "minio.infrastructure.svc.cluster.local:80"
             - name: MINIO_SECURE
@@ -93,6 +78,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: pipeline-secrets
+              mountPath: /etc/secrets
+              readOnly: true
           resources:
             requests:
               cpu: "100m"
@@ -103,6 +91,16 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: pipeline-secrets
+          secret:
+            secretName: pipeline-secrets
+            items:
+              - key: MINIO_ACCESS_KEY
+                path: minio-access-key
+              - key: MINIO_SECRET_KEY
+                path: minio-secret-key
+              - key: POSTGRES_DSN
+                path: postgres-dsn
 ---
 apiVersion: v1
 kind: Service

@@ -1,11 +1,21 @@
 import os
 
 
+def _read_secret(file_path: str, env_var: str, default: str = "") -> str:
+    """Read secret from mounted file; fall back to env var for local dev."""
+    try:
+        with open(file_path) as f:
+            return f.read().strip()
+    except OSError:
+        return os.getenv(env_var, default)
+
+
 class Config:
     kafka_bootstrap: str = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
     kafka_input_topic: str = os.getenv("KAFKA_INPUT_TOPIC", "document-chunks")
     kafka_event_topic: str = os.getenv("KAFKA_EVENT_TOPIC", "embedding-events")
     kafka_dlq_topic: str = os.getenv("KAFKA_DLQ_TOPIC", "dlq-document-chunks")
+    kafka_usage_topic: str = os.getenv("KAFKA_USAGE_TOPIC", "usage-events")
     kafka_consumer_group: str = os.getenv("KAFKA_CONSUMER_GROUP", "embedding-worker")
     kafka_produce_timeout_ms: int = int(os.getenv("KAFKA_PRODUCE_TIMEOUT_MS", "5000"))
 
@@ -19,8 +29,10 @@ class Config:
     milvus_port: int = int(os.getenv("MILVUS_PORT", "19530"))
     milvus_collection: str = os.getenv("MILVUS_COLLECTION", "documents")
 
-    postgres_dsn: str = os.getenv(
-        "POSTGRES_DSN", "postgresql://pipeline:pipeline@localhost:5432/pipeline"
+    postgres_dsn: str = _read_secret(
+        "/etc/secrets/postgres-dsn",
+        "POSTGRES_DSN",
+        "postgresql://pipeline:pipeline@localhost:5432/pipeline",
     )
 
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")

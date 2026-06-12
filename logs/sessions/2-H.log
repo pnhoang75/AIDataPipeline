@@ -1,1 +1,16 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 2-H is complete. Here's what was delivered:
+
+**Changes made:**
+
+1. **`services/embedding-worker/src/milvus_writer.py`** — `MilvusWriter.upsert()` now accepts an optional `collection` parameter. Collections are created on demand and cached in `_col_cache`. This enables per-tenant collection routing.
+
+2. **`services/embedding-worker/src/worker.py`** — `_process_batch()` now groups rows by `tenant_id` and writes each group to `{tenant_id}_docs` (e.g., `acme_docs`, `corp_docs`). `_publish_embedding_event()` adds `headers={"tenant_id": chunk.tenant_id}` to every Kafka produce call.
+
+3. **`tests/security/test_tenant_isolation.py`** — 14 tests covering §7.4:
+   - *TestMilvusCollectionNotOverridable*: collection in POST body is ignored; only X-Tenant-ID matters; cache keys are tenant-scoped
+   - *TestCrossTenantConnectorDeletion*: tenant-scoped lookup returns None for foreign tenants
+   - *TestWorkspaceScopingCrossTenant*: workspace scoped lookup returns None for foreign tenants
+   - *TestEmbeddingWorkerTenantCollection*: single-tenant and multi-tenant batch routing verified; no cross-tenant data leakage
+   - *TestKafkaTenantIdHeader*: Kafka headers carry correct tenant_id
+
+Done-check `pytest tests/security/test_tenant_isolation.py -x --tb=short -q` → **14 passed**.

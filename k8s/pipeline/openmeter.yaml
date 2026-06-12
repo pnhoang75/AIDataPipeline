@@ -1,0 +1,193 @@
+---
+# OpenMeter configuration — meters for api_calls and gpu_seconds keyed by tenant_id
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openmeter-config
+  namespace: infrastructure
+data:
+  config.yaml: |
+    address: ":8888"
+
+    telemetry:
+      address: ":10000"
+
+    ingest:
+      kafka:
+        broker: "ai-pipeline-kafka-kafka-bootstrap.infrastructure.svc.cluster.local:9092"
+        securityProtocol: PLAINTEXT
+        saslMechanisms: ""
+        partitions: 4
+
+    aggregation:
+      clickhouse:
+        address: ""
+        username: ""
+        password: ""
+        database: ""
+
+    sink:
+      kafka:
+        broker: "ai-pipeline-kafka-kafka-bootstrap.infrastructure.svc.cluster.local:9092"
+        securityProtocol: PLAINTEXT
+
+    meters:
+      - slug: api_calls
+        description: "RAG API query count per tenant"
+        eventType: "pipeline.rag.query"
+        aggregation: COUNT
+        groupBy:
+          tenant_id: "$.subject"
+
+      - slug: gpu_seconds
+        description: "Embedding GPU seconds per tenant"
+        eventType: "pipeline.embedding.batch"
+        valueProperty: "$.data.gpu_seconds"
+        aggregation: SUM
+        groupBy:
+          tenant_id: "$.subject"
+
+      - slug: bytes_ingested
+        description: "Bytes ingested per tenant"
+        eventType: "pipeline.rag.query"
+        valueProperty: "$.data.result_count"
+        aggregation: SUM
+        groupBy:
+          tenant_id: "$.subject"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openmeter
+  namespace: infrastructure
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmeter
+  namespace: infrastructure
+  labels:
+    app: openmeter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openmeter
+  template:
+    metadata:
+      labels:
+        app: openmeter
+    spec:
+      serviceAccountName: openmeter
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: openmeter
+          image: ghcr.io/openmeterio/openmeter:latest
+          imagePullPolicy: IfNotPresent
+          args: ["--config", "/etc/openmeter/config.yaml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - containerPort: 8888
+              name: http
+            - containerPort: 10000
+              name: telemetry
+          volumeMounts:
+            - name: config
+              mountPath: /etc/openmeter
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8888
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8888
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: openmeter-config
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmeter
+  namespace: infrastructure
+  labels:
+    app: openmeter
+spec:
+  selector:
+    app: openmeter
+  ports:
+    - name: http
+      port: 8888
+      targetPort: 8888
+    - name: telemetry
+      port: 10000
+      targetPort: 10000
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openmeter-egress
+  namespace: infrastructure
+spec:
+  podSelector:
+    matchLabels:
+      app: openmeter
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+      ports:
+        - port: 9092
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openmeter-ingress
+  namespace: infrastructure
+spec:
+  podSelector:
+    matchLabels:
+      app: openmeter
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8888
+          protocol: TCP
+        - port: 10000
+          protocol: TCP

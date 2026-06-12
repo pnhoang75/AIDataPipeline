@@ -50,12 +50,14 @@ class RagService:
         embedder,
         circuit_breaker: CircuitBreaker,
         cfg: Config = None,
+        usage_publisher=None,
     ):
         self._milvus = milvus_searcher
         self._redis = redis_client
         self._embedder = embedder
         self._cb = circuit_breaker
         self._cfg = cfg or _default_config
+        self._usage_publisher = usage_publisher
 
     def query(self, request: QueryRequest, tenant_id: str) -> QueryResponse:
         _start = _time.time()
@@ -75,8 +77,19 @@ class RagService:
                 if _METRICS_ENABLED:
                     _CACHE_HITS.inc()
                     _REQ_LATENCY.observe(_time.time() - _start)
+                cached_results = json.loads(cached_raw)
+                if self._usage_publisher is not None:
+                    try:
+                        self._usage_publisher.publish_rag_query(
+                            tenant_id=tenant_id,
+                            duration_ms=(_time.time() - _start) * 1000,
+                            result_count=len(cached_results),
+                            cached=True,
+                        )
+                    except Exception:
+                        pass
                 return QueryResponse(
-                    results=json.loads(cached_raw),
+                    results=cached_results,
                     cached=True,
                     request_id=request_id,
                 )
@@ -129,8 +142,19 @@ class RagService:
             except ConnectionError:
                 pass
 
+        elapsed_ms = (_time.time() - _start) * 1000
         if _METRICS_ENABLED:
-            _REQ_LATENCY.observe(_time.time() - _start)
+            _REQ_LATENCY.observe(elapsed_ms / 1000)
+        if self._usage_publisher is not None:
+            try:
+                self._usage_publisher.publish_rag_query(
+                    tenant_id=tenant_id,
+                    duration_ms=elapsed_ms,
+                    result_count=len(results),
+                    cached=False,
+                )
+            except Exception:
+                pass
         return QueryResponse(results=results, cached=False, request_id=request_id)
 
 

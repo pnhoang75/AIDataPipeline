@@ -59,11 +59,6 @@ spec:
                 configMapKeyRef:
                   name: pipeline-config
                   key: REDIS_OP_TIMEOUT_MS
-            - name: POSTGRES_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: pipeline-secrets
-                  key: POSTGRES_DSN
             - name: REDIS_URL
               value: "redis://redis.infrastructure.svc.cluster.local:6379/0"
             - name: NFS_MOUNT_PATH
@@ -83,6 +78,9 @@ spec:
               mountPath: /tmp
             - name: nfs-mount
               mountPath: /mnt/nfs
+            - name: pipeline-secrets
+              mountPath: /etc/secrets
+              readOnly: true
           resources:
             requests:
               cpu: "100m"
@@ -95,6 +93,12 @@ spec:
           emptyDir: {}
         - name: nfs-mount
           emptyDir: {}
+        - name: pipeline-secrets
+          secret:
+            secretName: pipeline-secrets
+            items:
+              - key: POSTGRES_DSN
+                path: postgres-dsn
 ---
 apiVersion: v1
 kind: Service

@@ -50,14 +50,6 @@ spec:
               value: "redis.infrastructure.svc.cluster.local"
             - name: REDIS_PORT
               value: "6379"
-            - name: QUOTA_DB_URL
-              value: "postgresql+psycopg2://app:$(QUOTA_DB_PASSWORD)@quota-db-rw.infrastructure.svc.cluster.local:5432/app"
-            - name: QUOTA_DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: quota-db-app
-                  key: password
-                  optional: true
             # Static limit for Free tier (100 RAG queries/day) — used when DB is unavailable.
             - name: QUOTA_STATIC_LIMIT_API_CALLS_PER_DAY
               value: "100"
@@ -81,6 +73,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: quota-db-secret
+              mountPath: /etc/secrets/quota-db
+              readOnly: true
           resources:
             requests:
               cpu: "100m"
@@ -91,6 +86,10 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: quota-db-secret
+          secret:
+            secretName: quota-db-app
+            optional: true
 ---
 apiVersion: v1
 kind: Service

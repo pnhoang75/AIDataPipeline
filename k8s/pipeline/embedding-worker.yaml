@@ -49,17 +49,14 @@ spec:
                 configMapKeyRef:
                   name: pipeline-config
                   key: KAFKA_PRODUCE_TIMEOUT_MS
-            - name: POSTGRES_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: pipeline-secrets
-                  key: POSTGRES_DSN
             - name: KAFKA_INPUT_TOPIC
               value: "document-chunks"
             - name: KAFKA_EVENT_TOPIC
               value: "embedding-events"
             - name: KAFKA_DLQ_TOPIC
               value: "dlq-document-chunks"
+            - name: KAFKA_USAGE_TOPIC
+              value: "usage-events"
             - name: KAFKA_CONSUMER_GROUP
               value: "embedding-worker"
             - name: EMBEDDING_BACKEND
@@ -93,6 +90,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: pipeline-secrets
+              mountPath: /etc/secrets
+              readOnly: true
           resources:
             requests:
               cpu: "500m"
@@ -103,6 +103,12 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: pipeline-secrets
+          secret:
+            secretName: pipeline-secrets
+            items:
+              - key: POSTGRES_DSN
+                path: postgres-dsn
 ---
 apiVersion: v1
 kind: Service

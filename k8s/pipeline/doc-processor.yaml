@@ -69,11 +69,6 @@ spec:
                 configMapKeyRef:
                   name: pipeline-config
                   key: CHUNK_OVERLAP_TOKENS
-            - name: POSTGRES_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: pipeline-secrets
-                  key: POSTGRES_DSN
             - name: KAFKA_INPUT_TOPIC
               value: "raw-documents"
             - name: KAFKA_OUTPUT_TOPIC
@@ -86,19 +81,12 @@ spec:
               value: "minio.infrastructure.svc.cluster.local:80"
             - name: MINIO_SECURE
               value: "false"
-            - name: MINIO_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: pipeline-secrets
-                  key: MINIO_ACCESS_KEY
-            - name: MINIO_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: pipeline-secrets
-                  key: MINIO_SECRET_KEY
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: pipeline-secrets
+              mountPath: /etc/secrets
+              readOnly: true
           resources:
             requests:
               cpu: "200m"
@@ -109,6 +97,16 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: pipeline-secrets
+          secret:
+            secretName: pipeline-secrets
+            items:
+              - key: MINIO_ACCESS_KEY
+                path: minio-access-key
+              - key: MINIO_SECRET_KEY
+                path: minio-secret-key
+              - key: POSTGRES_DSN
+                path: postgres-dsn
 ---
 apiVersion: v1
 kind: Service

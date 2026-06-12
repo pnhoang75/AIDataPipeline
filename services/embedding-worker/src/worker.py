@@ -1,7 +1,9 @@
+import json
 import logging
 import time
+import uuid
 from collections import defaultdict
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from backends import EmbeddingBackend, RateLimitError
 from config import Config
@@ -22,6 +24,7 @@ class EmbeddingWorker:
         dlq_producer,
         db_conn,
         cfg: Config,
+        usage_producer=None,
     ):
         self._consumer = consumer
         self._backend = backend
@@ -30,6 +33,7 @@ class EmbeddingWorker:
         self._dlq_producer = dlq_producer
         self._db_conn = db_conn
         self._cfg = cfg
+        self._usage_producer = usage_producer
         self._running = False
 
     def _send_to_dlq(
@@ -49,6 +53,34 @@ class EmbeddingWorker:
             value=envelope.to_json().encode(),
         )
         self._dlq_producer.flush(self._cfg.kafka_produce_timeout_ms / 1000)
+
+    def _publish_usage_event(self, tenant_id: str, batch_size: int, gpu_seconds: float) -> None:
+        if self._usage_producer is None:
+            return
+        event = {
+            "specversion": "1.0",
+            "type": "pipeline.embedding.batch",
+            "source": "embedding-worker",
+            "id": str(uuid.uuid4()),
+            "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "datacontenttype": "application/json",
+            "subject": tenant_id,
+            "data": {
+                "tenant_id": tenant_id,
+                "batch_size": batch_size,
+                "gpu_seconds": round(gpu_seconds, 6),
+                "model": self._cfg.embedding_model,
+            },
+        }
+        try:
+            self._usage_producer.produce(
+                topic=self._cfg.kafka_usage_topic,
+                key=tenant_id.encode(),
+                value=json.dumps(event).encode(),
+                headers={"content-type": "application/cloudevents+json"},
+            )
+        except Exception as exc:
+            logger.warning("Failed to publish usage event: %s", exc)
 
     def _publish_embedding_event(
         self, chunk: DocumentChunkEvent, chunk_count: int
@@ -78,6 +110,7 @@ class EmbeddingWorker:
 
         # Attempt embedding with one retry; handle rate limiting separately.
         embeddings = None
+        embed_start = time.time()
         for attempt in range(2):
             try:
                 embeddings = self._backend.embed_batch(texts)
@@ -104,6 +137,8 @@ class EmbeddingWorker:
 
         if embeddings is None:
             return
+
+        gpu_seconds = time.time() - embed_start
 
         rows = [
             {
@@ -135,6 +170,14 @@ class EmbeddingWorker:
                 return
 
         # Success path: publish completion events, update Postgres, commit offsets.
+        # Publish one usage event per tenant in this batch.
+        tenant_batch_sizes: Dict[str, int] = defaultdict(int)
+        for chunk in chunks:
+            tenant_batch_sizes[chunk.tenant_id] += 1
+
+        for t_id, count in tenant_batch_sizes.items():
+            self._publish_usage_event(t_id, count, gpu_seconds)
+
         for chunk in chunks:
             self._publish_embedding_event(chunk, len(chunks))
             try:

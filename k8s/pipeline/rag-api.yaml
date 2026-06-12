@@ -71,6 +71,13 @@ spec:
                 configMapKeyRef:
                   name: pipeline-config
                   key: REDIS_QUERY_CACHE_TTL_SEC
+            - name: KAFKA_BOOTSTRAP
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-config
+                  key: KAFKA_BOOTSTRAP
+            - name: KAFKA_USAGE_TOPIC
+              value: "usage-events"
             - name: SENTENCE_TRANSFORMERS_HOME
               value: "/tmp/st-models"
             - name: HF_HOME
@@ -140,6 +147,8 @@ spec:
         - port: 19530
           protocol: TCP
         - port: 6379
+          protocol: TCP
+        - port: 9092
           protocol: TCP
     # Allow HTTPS for HuggingFace model download on first startup
     - ports:

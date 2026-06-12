@@ -388,3 +388,65 @@ class TestSuccessPath:
         backend.embed_batch.assert_not_called()
         milvus.upsert.assert_not_called()
         consumer.commit.assert_not_called()
+
+
+# ──────────────────── usage event publishing ────────────────────
+
+class TestUsageEventPublishing:
+    def test_usage_event_published_per_tenant_on_success(self):
+        """After a successful batch, usage_producer.produce() is called once per tenant."""
+        usage_producer = MagicMock()
+        worker, consumer, backend, milvus, producer, dlq, db = _make_worker()
+        worker._usage_producer = usage_producer
+        worker._cfg.kafka_usage_topic = "usage-events"
+
+        batch = _make_batch(n=3)
+        worker._process_batch(batch)
+
+        # All 3 chunks belong to tenant-1 → one usage event
+        usage_producer.produce.assert_called_once()
+        call_kwargs = usage_producer.produce.call_args[1]
+        assert call_kwargs["topic"] == "usage-events"
+        assert call_kwargs["key"] == b"tenant-1"
+        payload = json.loads(call_kwargs["value"].decode())
+        assert payload["type"] == "pipeline.embedding.batch"
+        assert payload["subject"] == "tenant-1"
+        assert payload["data"]["batch_size"] == 3
+        assert payload["data"]["gpu_seconds"] >= 0
+
+    def test_usage_event_not_published_on_dlq_failure(self):
+        """DLQ routing on embedding error means no usage event is published."""
+        backend = MagicMock()
+        backend.embed_batch.side_effect = Exception("backend error")
+
+        usage_producer = MagicMock()
+        worker, consumer, _, milvus, producer, dlq, db = _make_worker(backend=backend)
+        worker._usage_producer = usage_producer
+
+        batch = _make_batch(n=1)
+        worker._process_batch(batch)
+
+        usage_producer.produce.assert_not_called()
+
+    def test_no_usage_producer_does_not_raise(self):
+        """Worker without usage_producer completes batch normally."""
+        worker, consumer, backend, milvus, producer, dlq, db = _make_worker()
+        worker._usage_producer = None
+
+        batch = _make_batch(n=1)
+        worker._process_batch(batch)
+
+        consumer.commit.assert_called_once()
+
+    def test_usage_event_failure_does_not_abort_batch(self):
+        """usage_producer.produce() raising does not stop offset commit."""
+        usage_producer = MagicMock()
+        usage_producer.produce.side_effect = Exception("Kafka unavailable")
+
+        worker, consumer, backend, milvus, producer, dlq, db = _make_worker()
+        worker._usage_producer = usage_producer
+
+        batch = _make_batch(n=1)
+        worker._process_batch(batch)
+
+        consumer.commit.assert_called_once()

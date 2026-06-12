@@ -1,6 +1,15 @@
 import os
 
 
+def _read_secret(file_path: str, env_var: str, default: str = "") -> str:
+    """Read secret from mounted file; fall back to env var for local dev."""
+    try:
+        with open(file_path) as f:
+            return f.read().strip()
+    except OSError:
+        return os.getenv(env_var, default)
+
+
 class Config:
     redis_host: str = os.getenv("REDIS_HOST", "localhost")
     redis_port: int = int(os.getenv("REDIS_PORT", "6379"))
@@ -15,6 +24,9 @@ class Config:
 
     circuit_failure_threshold: int = int(os.getenv("CB_FAILURE_THRESHOLD", "5"))
     circuit_recovery_timeout: float = float(os.getenv("CB_RECOVERY_TIMEOUT", "30"))
+
+    kafka_bootstrap: str = os.getenv("KAFKA_BOOTSTRAP", "")
+    kafka_usage_topic: str = os.getenv("KAFKA_USAGE_TOPIC", "usage-events")
 
 
 config = Config()

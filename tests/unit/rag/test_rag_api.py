@@ -250,3 +250,103 @@ class TestMinScore:
 
         assert len(response.results) == 2
         assert all(r.score >= 0.5 for r in response.results)
+
+
+# ─── test_usage_publisher_called_on_query ────────────────────────────────────
+
+class TestUsagePublishing:
+    def test_usage_event_published_on_cache_miss(self):
+        """Successful non-cached query publishes pipeline.rag.query usage event."""
+        usage_publisher = MagicMock()
+        service, milvus, redis, embedder, cb = _make_service()
+        service._usage_publisher = usage_publisher
+
+        _query(service, tenant_id="acme")
+
+        usage_publisher.publish_rag_query.assert_called_once()
+        call_kwargs = usage_publisher.publish_rag_query.call_args[1]
+        assert call_kwargs["tenant_id"] == "acme"
+        assert call_kwargs["cached"] is False
+        assert isinstance(call_kwargs["duration_ms"], float)
+        assert call_kwargs["duration_ms"] >= 0
+
+    def test_usage_event_published_on_cache_hit(self):
+        """Cache hit also publishes usage event with cached=True."""
+        cached_results = [
+            {"chunk_id": "c1", "text": "text", "score": 0.8,
+             "source_type": "s3", "doc_id": "doc-1", "metadata": {}}
+        ]
+        redis = MagicMock()
+        redis.get.return_value = json.dumps(cached_results)
+
+        usage_publisher = MagicMock()
+        service, _, _, _, _ = _make_service(redis=redis)
+        service._usage_publisher = usage_publisher
+
+        _query(service, tenant_id="tenant-x")
+
+        usage_publisher.publish_rag_query.assert_called_once()
+        call_kwargs = usage_publisher.publish_rag_query.call_args[1]
+        assert call_kwargs["tenant_id"] == "tenant-x"
+        assert call_kwargs["cached"] is True
+
+    def test_no_usage_publisher_does_not_raise(self):
+        """No usage_publisher set → query completes normally without error."""
+        service, _, _, _, _ = _make_service()
+        service._usage_publisher = None
+
+        response = _query(service)
+
+        assert response is not None
+
+    def test_usage_publisher_failure_does_not_abort_query(self):
+        """UsagePublisher raising an error does not propagate to the caller."""
+        usage_publisher = MagicMock()
+        usage_publisher.publish_rag_query.side_effect = Exception("Kafka unavailable")
+        service, _, _, _, _ = _make_service()
+        service._usage_publisher = usage_publisher
+
+        # Should not raise
+        response = _query(service)
+        assert response is not None
+
+
+# ─── test_usage_publisher_unit ────────────────────────────────────────────────
+
+class TestUsagePublisherUnit:
+    def test_publish_rag_query_produces_cloudevent(self):
+        """UsagePublisher.publish_rag_query produces a CloudEvent to the correct topic."""
+        from events import UsagePublisher
+
+        producer = MagicMock()
+        pub = UsagePublisher(producer, topic="usage-events")
+
+        pub.publish_rag_query(
+            tenant_id="acme",
+            duration_ms=42.5,
+            result_count=3,
+            cached=False,
+        )
+
+        producer.produce.assert_called_once()
+        call_kwargs = producer.produce.call_args[1]
+        assert call_kwargs["topic"] == "usage-events"
+        assert call_kwargs["key"] == b"acme"
+        payload = json.loads(call_kwargs["value"].decode())
+        assert payload["type"] == "pipeline.rag.query"
+        assert payload["subject"] == "acme"
+        assert payload["data"]["tenant_id"] == "acme"
+        assert payload["data"]["duration_ms"] == 42.5
+        assert payload["data"]["result_count"] == 3
+        assert payload["data"]["cached"] is False
+
+    def test_publish_rag_query_producer_failure_is_swallowed(self):
+        """Producer.produce() raising does not propagate out of publish_rag_query."""
+        from events import UsagePublisher
+
+        producer = MagicMock()
+        producer.produce.side_effect = Exception("broker unavailable")
+        pub = UsagePublisher(producer, topic="usage-events")
+
+        # Should not raise
+        pub.publish_rag_query(tenant_id="t", duration_ms=1.0, result_count=0, cached=False)
