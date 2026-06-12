@@ -1,0 +1,105 @@
+---
+# Job: opa-bundle-upload
+# Packages the Rego policy into an OPA bundle (tar.gz) and uploads it to the
+# MinIO opa-bundles bucket. Re-run by deleting the completed Job and re-applying.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: opa-bundle-upload
+  namespace: ai-pipeline
+  labels:
+    app: opa
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: opa-bundle-upload
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bundle-upload
+          # MinIO client image with tar utility
+          image: minio/mc:RELEASE.2024-04-18T16-45-29Z
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              # Build bundle directory
+              mkdir -p /tmp/bundle/pipeline
+              cat > /tmp/bundle/pipeline/pipeline_authz.rego << 'REGO'
+              package pipeline.authz
+
+              default allow = false
+
+              allow {
+                  input.action == "use_gpu"
+                  input.license_type == "pro"
+              }
+
+              allow {
+                  input.action == "use_gpu"
+                  input.license_type == "enterprise"
+              }
+
+              allow {
+                  input.action == "query_collection"
+                  input.collection_name == concat("_", [input.tenant_id, "docs"])
+              }
+
+              allowed_connectors := {"s3", "nfs"} { input.license_type == "free" }
+              allowed_connectors := {"s3", "nfs", "database", "stream"} { input.license_type != "free" }
+
+              allow {
+                  input.action == "use_connector"
+                  input.connector_type == allowed_connectors[_]
+              }
+              REGO
+
+              cat > /tmp/bundle/.manifest << 'JSON'
+              {"revision":"v1","roots":["pipeline"]}
+              JSON
+
+              # Package as tar.gz
+              cd /tmp && tar czf /tmp/pipeline-authz-bundle.tar.gz -C /tmp/bundle .
+
+              # Configure MinIO client and upload
+              mc alias set minio \
+                http://minio.infrastructure.svc.cluster.local:80 \
+                "$MINIO_ACCESS_KEY" \
+                "$MINIO_SECRET_KEY"
+
+              mc cp /tmp/pipeline-authz-bundle.tar.gz \
+                minio/opa-bundles/pipeline-authz/pipeline-authz-bundle.tar.gz
+
+              echo "Bundle uploaded to minio/opa-bundles/pipeline-authz/pipeline-authz-bundle.tar.gz"
+          env:
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-creds
+                  key: accesskey
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-creds
+                  key: secretkey
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]

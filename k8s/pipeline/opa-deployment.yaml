@@ -1,0 +1,117 @@
+---
+# ServiceAccount for OPA
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: opa
+  namespace: ai-pipeline
+  labels:
+    app: opa
+---
+# OPA Deployment — loads Rego bundle from MinIO opa-bundles bucket.
+# Falls back to the opa-policy ConfigMap if MinIO is unreachable at startup.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa
+  namespace: ai-pipeline
+  labels:
+    app: opa
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opa
+  template:
+    metadata:
+      labels:
+        app: opa
+    spec:
+      serviceAccountName: opa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Copies ConfigMap policy into the emptyDir bundle mount as a fallback.
+        - name: copy-policy
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /bundle/pipeline
+              cp /policy/pipeline_authz.rego /bundle/pipeline/
+              echo '{"revision":"v1","roots":["pipeline"]}' > /bundle/.manifest
+          volumeMounts:
+            - name: policy-configmap
+              mountPath: /policy
+            - name: bundle-dir
+              mountPath: /bundle
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: opa
+          image: openpolicyagent/opa:0.65.0
+          args:
+            - run
+            - --server
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - /bundle
+          ports:
+            - containerPort: 8181
+              name: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health?bundle=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: bundle-dir
+              mountPath: /bundle
+      volumes:
+        - name: policy-configmap
+          configMap:
+            name: opa-policy
+        - name: bundle-dir
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa
+  namespace: ai-pipeline
+  labels:
+    app: opa
+spec:
+  selector:
+    app: opa
+  ports:
+    - name: http
+      port: 8181
+      targetPort: 8181

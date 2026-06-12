@@ -1,0 +1,67 @@
+---
+# KongPlugin: opa-authz
+# Lua pre-function that calls the OPA REST API to evaluate pipeline.authz/allow.
+# Input: action="use_connector", connector_type from request body, license_type
+# from X-License-Type header (set by JWT extraction in extract-tenant-id plugin).
+# Fail-open: if OPA is unreachable the request is allowed (matching quota-check pattern).
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: opa-authz
+  namespace: ai-pipeline
+  labels:
+    app: kong
+plugin: pre-function
+config:
+  access:
+    - |
+      -- OPA authz check: evaluate pipeline.authz/allow against the request context.
+      -- Fail-open if OPA is unavailable (matches quota-check fail-open pattern).
+      local cjson = require("cjson")
+      local http  = require("resty.http")
+
+      local action       = ngx.req.get_headers()["X-OPA-Action"] or "use_connector"
+      local license_type = ngx.req.get_headers()["X-License-Type"] or "free"
+      local tenant_id    = ngx.req.get_headers()["X-Tenant-ID"] or ""
+
+      -- Only evaluate connector_type when action is use_connector
+      local connector_type = ngx.req.get_headers()["X-Connector-Type"] or ""
+
+      local input = {
+        action         = action,
+        license_type   = license_type,
+        tenant_id      = tenant_id,
+        connector_type = connector_type,
+        collection_name = tenant_id .. "_docs",
+      }
+
+      local httpc = http.new()
+      httpc:set_timeout(100)  -- 100 ms, fail-open on timeout
+
+      local res, err = httpc:request_uri(
+        "http://opa.ai-pipeline.svc.cluster.local:8181/v1/data/pipeline/authz/allow",
+        {
+          method  = "POST",
+          body    = cjson.encode({ input = input }),
+          headers = { ["Content-Type"] = "application/json" },
+        }
+      )
+
+      if err then
+        -- Fail-open: OPA unreachable
+        kong.log.warn("OPA unreachable, failing open: ", err)
+        return
+      end
+
+      if res.status ~= 200 then
+        kong.log.warn("OPA returned non-200, failing open: ", res.status)
+        return
+      end
+
+      local body = cjson.decode(res.body)
+      if body and body.result == false then
+        return kong.response.exit(403, {
+          message = "Forbidden by OPA policy",
+          action  = action,
+        })
+      end

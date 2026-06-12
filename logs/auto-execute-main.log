@@ -3493,3 +3493,39 @@ After doing this, you may fix the identity used for this commit with:
 [0;32m[14:00:52] ✓[0m Claude limit cleared — resuming!
 [0;36m[14:00:52][0m Retrying session 2-F...
 [0;36m[14:00:55][0m Attempt 2 for session 2-F...
+[0;32m[14:01:42] ✓[0m Sentinel found for session 2-F.
+[main 25534c4] executor: session 2-F complete
+ Committer: Phuong Hoang <phuonghoang@Phuongs-Mac-mini.local>
+Your name and email address were configured automatically based
+on your username and hostname. Please check that they are accurate.
+You can suppress this message by setting them explicitly. Run the
+following command and follow the instructions in your editor to edit
+your configuration file:
+
+    git config --global --edit
+
+After doing this, you may fix the identity used for this commit with:
+
+    git commit --amend --reset-author
+
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+[0;32m[14:01:42] ✓[0m Session 2-F done.
+[1m────────────────────────────────────────────────────────[0m
+[0;36m[14:01:42][0m [1mSession 2-G[0m [phase 2] — OPA Rego policies + MinIO bundle deploy
+[0;36m[14:01:42][0m Index 21/51
+[main 33171ef] executor: start session 2-G
+ Committer: Phuong Hoang <phuonghoang@Phuongs-Mac-mini.local>
+Your name and email address were configured automatically based
+on your username and hostname. Please check that they are accurate.
+You can suppress this message by setting them explicitly. Run the
+following command and follow the instructions in your editor to edit
+your configuration file:
+
+    git config --global --edit
+
+After doing this, you may fix the identity used for this commit with:
+
+    git commit --amend --reset-author
+
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+[0;36m[14:01:46][0m Attempt 1 for session 2-G...

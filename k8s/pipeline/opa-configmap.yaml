@@ -1,0 +1,39 @@
+---
+# ConfigMap: opa-policy
+# Contains the Rego policy bundle loaded by the OPA sidecar at startup.
+# Kong's opa-authz pre-function plugin calls OPA's REST API using this policy.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-policy
+  namespace: ai-pipeline
+  labels:
+    app: opa
+data:
+  pipeline_authz.rego: |
+    package pipeline.authz
+
+    default allow = false
+
+    allow {
+        input.action == "use_gpu"
+        input.license_type == "pro"
+    }
+
+    allow {
+        input.action == "use_gpu"
+        input.license_type == "enterprise"
+    }
+
+    allow {
+        input.action == "query_collection"
+        input.collection_name == concat("_", [input.tenant_id, "docs"])
+    }
+
+    allowed_connectors := {"s3", "nfs"} { input.license_type == "free" }
+    allowed_connectors := {"s3", "nfs", "database", "stream"} { input.license_type != "free" }
+
+    allow {
+        input.action == "use_connector"
+        input.connector_type == allowed_connectors[_]
+    }
