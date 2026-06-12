@@ -1,7 +1,7 @@
 {
   "current_index": 24,
   "current_session": "2-J",
-  "status": "running",
+  "status": "waiting_for_window_reset",
   "last_completed": "2-I",
   "last_completed_at": "2026-06-12T21:25:43Z",
   "last_attempt_at": "2026-06-12T21:25:43Z",
