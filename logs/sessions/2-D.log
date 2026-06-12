@@ -1,1 +1,10 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 2-D is complete. All 6 unit tests from test plan §2.5 pass:
+
+- `test_check_quota_allows_under_limit` — Redis INCR=5, limit=10 → ALLOWED
+- `test_check_quota_denies_over_limit` — Redis INCR=11, limit=10 → DENIED + DECRBY rollback
+- `test_check_quota_unlimited_always_allows` — limit=None → UNLIMITED, Redis untouched
+- `test_record_usage_deduplicates_on_event_id` — same event_id twice → second call deduped, incrby called once
+- `test_quota_check_respects_override` — mock session returns override row (50) → get_effective_limit returns 50, tier lookup skipped
+- `test_fail_open_on_redis_unavailable` — ConnectionError → ALLOWED + skip_counter.inc() called
+
+Sentinel `.sessions-done/2-D` created; `execution-progress.json` updated to session 2-E.

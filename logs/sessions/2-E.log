@@ -1,1 +1,9 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 2-E is complete. All 5 integration tests pass:
+
+- `test_quota_check_increments_redis_counter` — CheckQuota writes counter to real Redis
+- `test_quota_check_denies_at_limit` — counter at Free limit returns DENIED with rollback
+- `test_quota_check_enterprise_never_denied` — NULL limit returns UNLIMITED without touching Redis
+- `test_record_usage_dedup` — duplicate event_id only increments counter once
+- `test_fail_open_on_redis_error` — unreachable Redis returns ALLOWED and fires skip counter
+
+The main obstacle was Docker Desktop running out of disk space (Kafka image was consuming 1.3 GB unused). After removing it, testcontainers could spin up the Redis and PostgreSQL containers. Sentinel `.sessions-done/2-E` created and `execution-progress.json` advanced to session 2-F.

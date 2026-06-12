@@ -1,1 +1,10 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 2-C is complete. Here's what was done:
+
+**Created:**
+- `db/alembic.ini` — Alembic config pointing to `quota_db`
+- `db/alembic/env.py` — env that reads `QUOTA_DB_URL` env var
+- `db/alembic/versions/0001_initial_schema.py` — creates all 7 tables: `license_tiers`, `tenant_licenses`, `quota_overrides`, `usage_history` (partitioned on PostgreSQL, plain on SQLite), `workspaces`, `workspace_sources`, `source_file_status`
+- `db/alembic/versions/0002_seed_license_tiers.py` — seeds Free/Pro/Enterprise tiers (Pro=unlimited connectors, NULL=unlimited for Enterprise fields)
+- `tests/unit/db/test_migrations.py` — 19 tests covering revision chain, all 7 tables, column structure, and seed data values
+
+**Done-check:** `pytest tests/unit/db/test_migrations.py -x --tb=short -q` → **19 passed**.

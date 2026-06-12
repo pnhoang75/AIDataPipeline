@@ -1,1 +1,7 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 2-B is complete.
+
+**What was done:**
+- Kong 3.9 OSS Ingress Controller already deployed in the cluster with the full plugin chain active
+- All manifests committed: Kong Helm values, `kong-resources.yaml` (4 KongPlugins + KongConsumer + JWT credential Secret + 2 Ingress rules), the Lua `quota-check` plugin ConfigMap (gRPC framing, 100ms timeout, fail-open), the nginx hostPort proxy, and Keycloak manifests from session 2-A
+- Done-check confirmed: `curl http://localhost/v1/query | grep 401` returns `401` — unauthenticated requests are rejected by the `jwt-auth` plugin
+- Sentinel `.sessions-done/2-B` created; `execution-progress.json` advanced to session 2-C

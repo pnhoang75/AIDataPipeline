@@ -1,0 +1,19 @@
+Session 1-J is complete. Here's what was delivered:
+
+**Code changes:**
+- Added `prometheus_client.start_http_server(9090)` to `connector-s3`, `connector-nfs`, `doc-processor`, and `embedding-worker` main entry points
+- Added `rag_request_duration_seconds` Histogram and `/metrics` endpoint to `rag-api` (FastAPI)
+
+**K8s manifests (`k8s/pipeline/monitoring.yaml`):**
+- 5 `ServiceMonitor` CRs — one per service (connector-s3, connector-nfs, doc-processor, embedding-worker on port `metrics:9090`; rag-api on port `http:8000` path `/metrics`)
+- 1 `PrometheusRule` CR (`pipeline-alerts`) with three alert rules:
+  - `KafkaConsumerLagHigh` — fires when Kafka consumer group lag > 1000 for 5 min
+  - `ConnectorDown` — fires when connector scrape target is down for 2 min
+  - `RAGLatencyHigh` — fires when p99 RAG query latency > 2s for 5 min
+
+**Updated manifests:**
+- Added `Service` with `metrics` port (9090) to each worker deployment YAML
+- Added label to `rag-api` Service for ServiceMonitor selector
+- Extended `allow-prometheus-scrape` NetworkPolicy to include port 8000
+
+**Verified:** `kubectl get prometheusrule -n ai-pipeline` shows `pipeline-alerts` and all 5 ServiceMonitors are live. All unit tests (10 rag, 9 connector) pass.
