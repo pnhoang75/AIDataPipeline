@@ -1,9 +1,9 @@
 {
-  "current_index": 20,
-  "current_session": "2-F",
-  "status": "running",
-  "last_completed": "2-E",
-  "last_completed_at": "2026-06-08T13:32:00Z",
+  "current_index": 21,
+  "current_session": "2-G",
+  "status": "idle",
+  "last_completed": "2-F",
+  "last_completed_at": "2026-06-12T21:00:00Z",
   "last_attempt_at": "2026-06-12T20:33:15Z",
   "window_started_at": "2026-06-06T00:00:00Z",
   "window_reset_at": "2026-06-08T16:50:27Z",
@@ -35,7 +35,8 @@
     "2-D",
     "2-D",
     "2-E",
-    "2-E"
+    "2-E",
+    "2-F"
   ],
   "sessions_failed": [
     "2-A"
