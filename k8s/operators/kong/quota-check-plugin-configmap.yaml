@@ -34,6 +34,13 @@ data:
                 },
               },
               {
+                http_port = {
+                  type = "integer",
+                  default = 8080,
+                  between = { 1, 65535 },
+                },
+              },
+              {
                 timeout_ms = {
                   type = "integer",
                   default = 100,
@@ -47,96 +54,69 @@ data:
     }
 
   handler.lua: |
-    -- Quota-check Kong plugin (session 2-B).
-    -- Makes a gRPC unary CheckQuota call to the Quota Service with a 100 ms
-    -- socket timeout. Any connection / protocol error is treated as fail-open
-    -- so that Quota Service downtime does not block requests.
-    -- Full gRPC framing wired in session 2-F when the Quota Service is deployed.
+    -- Quota-check Kong plugin (session 2-F).
+    -- Makes an HTTP/1.1 POST to the Quota Service /v1/check-quota endpoint.
+    -- Returns 429 when the service responds with status="DENIED".
+    -- Fails open on any connection or protocol error so Quota Service downtime
+    -- does not block legitimate requests.
 
     local QuotaCheck = {
       PRIORITY = 850,   -- runs after jwt (990) and pre-function (999)
-      VERSION  = "0.1.0",
+      VERSION  = "0.2.0",
     }
-
-    -- Minimal HTTP/2 connection preface (client magic + SETTINGS frame).
-    local H2_CLIENT_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
-    -- Empty SETTINGS frame  (type=0x4, flags=0x0, stream_id=0, length=0)
-    local H2_SETTINGS_FRAME = "\x00\x00\x00\x04\x00\x00\x00\x00\x00"
-
-    local function encode_varint(n)
-      local bytes = {}
-      while n > 0x7f do
-        bytes[#bytes + 1] = string.char(bit.bor(bit.band(n, 0x7f), 0x80))
-        n = bit.rshift(n, 7)
-      end
-      bytes[#bytes + 1] = string.char(n)
-      return table.concat(bytes)
-    end
-
-    -- Build a minimal serialised CheckQuotaRequest protobuf:
-    --   field 1 (tenant_id) = string
-    --   field 2 (metric)    = string "api_calls"
-    local function build_check_quota_proto(tenant_id)
-      local f1_tag   = "\x0a"                       -- field 1, wire type 2 (length-delimited)
-      local f1_val   = encode_varint(#tenant_id) .. tenant_id
-      local f2_tag   = "\x12"                       -- field 2, wire type 2
-      local f2_str   = "api_calls"
-      local f2_val   = encode_varint(#f2_str) .. f2_str
-      return f1_tag .. f1_val .. f2_tag .. f2_val
-    end
-
-    -- Wrap raw proto bytes in a gRPC data frame (5-byte length-prefix).
-    local function grpc_frame(proto_bytes)
-      local len = #proto_bytes
-      -- compressed flag (0) + 4-byte big-endian length
-      return string.char(0,
-        bit.band(bit.rshift(len, 24), 0xff),
-        bit.band(bit.rshift(len, 16), 0xff),
-        bit.band(bit.rshift(len,  8), 0xff),
-        bit.band(len, 0xff)
-      ) .. proto_bytes
-    end
 
     function QuotaCheck:access(conf)
       local tenant_id = kong.request.get_header("X-Tenant-ID")
       if not tenant_id or tenant_id == "" then
-        -- No tenant context — upstream will reject anyway; fail-open here.
         kong.log.warn("quota-check: missing X-Tenant-ID header, skipping check (fail-open)")
         return
       end
 
-      local ok, err = pcall(function()
-        local sock = ngx.socket.tcp()
-        sock:settimeout(conf.timeout_ms)
-
-        local connected, conn_err = sock:connect(conf.host, conf.port)
-        if not connected then
-          -- Quota Service not reachable → fail-open.
-          -- TODO (session 2-F): alert/metric on repeated failures.
-          kong.log.warn("quota-check: connect to quota-service failed (fail-open): ", tostring(conn_err))
-          return
-        end
-
-        -- Send HTTP/2 client preface so the server can identify the protocol.
-        local _, send_err = sock:send(H2_CLIENT_PREFACE .. H2_SETTINGS_FRAME)
-        if send_err then
-          kong.log.warn("quota-check: send preface failed (fail-open): ", tostring(send_err))
-          sock:close()
-          return
-        end
-
-        -- TODO (session 2-F): send full HEADERS + DATA frames for the
-        --   quota.v1.QuotaService/CheckQuota unary RPC and parse the response.
-        --   For now we only establish the connection to confirm reachability.
-        sock:close()
-      end)
-
+      local ok, http_lib = pcall(require, "resty.http")
       if not ok then
-        kong.log.warn("quota-check: unexpected error (fail-open): ", tostring(err))
+        kong.log.warn("quota-check: resty.http not available, fail-open")
+        return
       end
 
-      -- Fail-open: if quota service is unavailable we still let the request through.
-      -- Actual quota enforcement (429) added in session 2-F.
+      local httpc = http_lib.new()
+      httpc:set_timeout(conf.timeout_ms)
+
+      local body = '{"tenant_id":"' .. tenant_id
+                .. '","metric":"API_CALLS_PER_DAY","amount":1}'
+      local url = "http://" .. conf.host .. ":" .. tostring(conf.http_port)
+               .. "/v1/check-quota"
+
+      local res, err = httpc:request_uri(url, {
+        method  = "POST",
+        body    = body,
+        headers = { ["Content-Type"] = "application/json" },
+      })
+
+      if not res then
+        kong.log.warn("quota-check: request to quota-service failed (fail-open): ",
+                      tostring(err))
+        return
+      end
+
+      if res.status ~= 200 then
+        kong.log.warn("quota-check: unexpected HTTP status ", res.status, " (fail-open)")
+        return
+      end
+
+      local ok2, data = pcall(require("cjson").decode, res.body)
+      if not ok2 or not data then
+        kong.log.warn("quota-check: failed to parse response (fail-open)")
+        return
+      end
+
+      if data.status == "DENIED" then
+        return kong.response.exit(429, {
+          message     = "quota_exceeded",
+          detail      = data.deny_reason or "Daily API call quota exhausted",
+          current     = data.current_usage,
+          limit       = data.limit,
+        })
+      end
     end
 
     return QuotaCheck

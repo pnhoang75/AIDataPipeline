@@ -1,0 +1,190 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: quota-service
+  namespace: ai-pipeline
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quota-service
+  namespace: ai-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quota-service
+  template:
+    metadata:
+      labels:
+        app: quota-service
+    spec:
+      serviceAccountName: quota-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: quota-service
+          image: ai-pipeline/quota-service:latest
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - containerPort: 50051
+              name: grpc
+            - containerPort: 8080
+              name: http
+            - containerPort: 9090
+              name: metrics
+          env:
+            - name: REDIS_HOST
+              value: "redis.infrastructure.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: QUOTA_DB_URL
+              value: "postgresql+psycopg2://app:$(QUOTA_DB_PASSWORD)@quota-db-rw.infrastructure.svc.cluster.local:5432/app"
+            - name: QUOTA_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: quota-db-app
+                  key: password
+                  optional: true
+            # Static limit for Free tier (100 RAG queries/day) — used when DB is unavailable.
+            - name: QUOTA_STATIC_LIMIT_API_CALLS_PER_DAY
+              value: "100"
+            - name: GRPC_PORT
+              value: "50051"
+            - name: HTTP_PORT
+              value: "8080"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quota-service
+  namespace: ai-pipeline
+  labels:
+    app: quota-service
+spec:
+  selector:
+    app: quota-service
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+    - name: http
+      port: 8080
+      targetPort: 8080
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+  type: ClusterIP
+---
+# Egress: quota-service → Redis + PostgreSQL in infrastructure
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quota-service-egress
+  namespace: ai-pipeline
+spec:
+  podSelector:
+    matchLabels:
+      app: quota-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+      ports:
+        - port: 6379
+          protocol: TCP
+        - port: 5432
+          protocol: TCP
+---
+# Ingress: allow Kong (kong namespace) and ai-pipeline pods to reach quota-service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quota-service-ingress
+  namespace: ai-pipeline
+spec:
+  podSelector:
+    matchLabels:
+      app: quota-service
+  policyTypes:
+    - Ingress
+  ingress:
+    # Kong Ingress Controller calls HTTP endpoint
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kong
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 50051
+          protocol: TCP
+    # Other pipeline services may call gRPC or HTTP
+    - from:
+        - podSelector: {}
+      ports:
+        - port: 50051
+          protocol: TCP
+        - port: 8080
+          protocol: TCP
+---
+# cert-manager Certificate for mTLS (gRPC clients validate server cert)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: quota-service-tls
+  namespace: ai-pipeline
+spec:
+  secretName: quota-service-tls
+  issuerRef:
+    name: pipeline-ca-issuer
+    kind: ClusterIssuer
+  commonName: quota-service.ai-pipeline.svc.cluster.local
+  dnsNames:
+    - quota-service.ai-pipeline.svc.cluster.local
+    - quota-service.ai-pipeline.svc
+    - quota-service
+  usages:
+    - server auth
+    - client auth
