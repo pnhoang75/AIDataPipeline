@@ -1,6 +1,7 @@
 import logging
 import time
-from typing import List, Tuple
+from collections import defaultdict
+from typing import Dict, List, Tuple
 
 from backends import EmbeddingBackend, RateLimitError
 from config import Config
@@ -63,6 +64,7 @@ class EmbeddingWorker:
             topic=self._cfg.kafka_event_topic,
             key=chunk.doc_id.encode(),
             value=evt.to_json().encode(),
+            headers={"tenant_id": chunk.tenant_id},
         )
 
     def _process_batch(self, batch: List[Tuple]) -> None:
@@ -117,13 +119,20 @@ class EmbeddingWorker:
             for chunk, embedding in zip(chunks, embeddings)
         ]
 
-        try:
-            self._milvus_writer.upsert(rows)
-        except Exception as e:
-            logger.error("Milvus upsert failed: %s", e)
-            for msg, chunk in zip(messages, chunks):
-                self._send_to_dlq(msg, chunk, "milvus_error", str(e))
-            return
+        # Group rows by tenant and write to per-tenant Milvus collections.
+        tenant_rows: Dict[str, List[dict]] = defaultdict(list)
+        for row in rows:
+            tenant_rows[row["tenant_id"]].append(row)
+
+        for t_id, t_rows in tenant_rows.items():
+            collection = f"{t_id}_docs"
+            try:
+                self._milvus_writer.upsert(t_rows, collection=collection)
+            except Exception as e:
+                logger.error("Milvus upsert failed for tenant %s: %s", t_id, e)
+                for msg, chunk in zip(messages, chunks):
+                    self._send_to_dlq(msg, chunk, "milvus_error", str(e))
+                return
 
         # Success path: publish completion events, update Postgres, commit offsets.
         for chunk in chunks:

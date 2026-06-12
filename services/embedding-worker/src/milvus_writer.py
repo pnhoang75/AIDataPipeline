@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -9,6 +9,9 @@ class MilvusWriter:
 
     Uses chunk_id as the VARCHAR primary key so upsert() is truly idempotent:
     re-delivering the same chunk overwrites the existing row rather than creating a duplicate.
+
+    Supports per-tenant collections: pass collection='{tenant_id}_docs' to upsert() to route
+    rows to the correct tenant-scoped collection. Collections are created on demand.
     """
 
     def __init__(
@@ -25,6 +28,7 @@ class MilvusWriter:
         self._dim = dim
         self._uri = uri  # If set, overrides host/port (supports Milvus Lite file path)
         self._col = None
+        self._col_cache: Dict[str, object] = {}
 
     def connect(self) -> None:
         from pymilvus import connections
@@ -32,15 +36,20 @@ class MilvusWriter:
             connections.connect(alias="default", uri=self._uri)
         else:
             connections.connect(alias="default", host=self._host, port=str(self._port))
-        self._ensure_collection()
+        self._ensure_collection_by_name(self._collection_name)
+        self._col = self._col_cache[self._collection_name]
 
-    def _ensure_collection(self) -> None:
+    def _ensure_collection_by_name(self, name: str) -> object:
+        if name in self._col_cache:
+            return self._col_cache[name]
+
         from pymilvus import Collection, CollectionSchema, FieldSchema, DataType, utility
 
-        if utility.has_collection(self._collection_name):
-            self._col = Collection(self._collection_name)
-            self._col.load()
-            return
+        if utility.has_collection(name):
+            col = Collection(name)
+            col.load()
+            self._col_cache[name] = col
+            return col
 
         fields = [
             # chunk_id is the primary key so upsert() deduplicates by chunk identity.
@@ -54,17 +63,30 @@ class MilvusWriter:
             FieldSchema("tenant_id", DataType.VARCHAR, max_length=256),
         ]
         schema = CollectionSchema(fields, description="Pipeline document chunks")
-        self._col = Collection(self._collection_name, schema=schema)
-        self._col.create_index(
+        col = Collection(name, schema=schema)
+        col.create_index(
             "embedding",
             {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 128}},
         )
-        self._col.load()
+        col.load()
+        self._col_cache[name] = col
+        return col
 
-    def upsert(self, rows: List[dict]) -> int:
-        """Upsert rows by chunk_id; returns number of rows written."""
+    def _ensure_collection(self) -> None:
+        self._col = self._ensure_collection_by_name(self._collection_name)
+
+    def upsert(self, rows: List[dict], collection: Optional[str] = None) -> int:
+        """Upsert rows by chunk_id into the given collection (defaults to configured collection).
+
+        Pass collection='{tenant_id}_docs' to route rows to the correct tenant-scoped collection.
+        The target collection is created on demand if it does not exist.
+        """
         if not rows:
             return 0
+        target_name = collection or self._collection_name
+        col = self._col_cache.get(target_name)
+        if col is None:
+            col = self._ensure_collection_by_name(target_name)
         data = [
             [r["chunk_id"] for r in rows],
             [r["doc_id"] for r in rows],
@@ -75,8 +97,8 @@ class MilvusWriter:
             [r["metadata"] for r in rows],
             [r.get("tenant_id", "") for r in rows],
         ]
-        mr = self._col.upsert(data)
-        self._col.flush()
+        mr = col.upsert(data)
+        col.flush()
         return mr.upsert_count
 
     def query(self, expr: str, output_fields: Optional[List[str]] = None) -> List[dict]:
