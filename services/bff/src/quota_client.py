@@ -5,6 +5,26 @@ import httpx
 from config import config as _default_config
 
 
+async def check_quota(tenant_id: str, metric: str, cfg=None) -> Dict:
+    """Check and increment quota. Returns {"allowed": bool, "status": str}."""
+    cfg = cfg or _default_config
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{cfg.quota_service_url}/v1/check-quota",
+            json={
+                "tenant_id": tenant_id,
+                "metric": metric,
+                "amount": 1,
+                "increment_on_allow": True,
+            },
+            timeout=5.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    status = data.get("status", "DENIED")
+    return {"allowed": status in ("ALLOWED", "UNLIMITED"), "status": status}
+
+
 async def get_usage(tenant_id: str, metric: str, cfg=None) -> Dict:
     cfg = cfg or _default_config
     async with httpx.AsyncClient() as client:

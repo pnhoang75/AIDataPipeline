@@ -119,3 +119,26 @@ async def delete_custom_object(
     async with ApiClient() as api:
         custom = client.CustomObjectsApi(api)
         await custom.delete_namespaced_custom_object(group, version, namespace, plural, name)
+
+
+async def browse_nfs_path(namespace: str, connector_id: str, path: str) -> List[Dict]:
+    """List files at an NFS path via kubectl exec on the connector pod."""
+    await _ensure_initialized()
+    from kubernetes_asyncio import client, stream
+    from kubernetes_asyncio.client import ApiClient
+    pod_label = f"connector-id={connector_id}"
+    pods = await list_pods(namespace, label_selector=pod_label)
+    if not pods:
+        return []
+    async with ApiClient() as api:
+        v1 = client.CoreV1Api(api)
+        resp = await stream.ws_client.WsApiClient(api).connect_get_namespaced_pod_exec(
+            pods[0]["name"],
+            namespace,
+            command=["ls", "-la", path],
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+        )
+    return [{"name": line.strip()} for line in (resp or "").splitlines() if line.strip()]
