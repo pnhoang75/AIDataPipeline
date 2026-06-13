@@ -1,0 +1,148 @@
+---
+# ── ClusterRole ───────────────────────────────────────────────────────────────
+# Cluster-wide permissions needed by the Pipeline Operator:
+#   - Read/update all pipeline CRDs (DataConnector, TenantWorkspace, EmbeddingConfig)
+#   - Create/delete Deployments, CronJobs, Roles, RoleBindings, KafkaTopic, KafkaUser
+#   - Coordinate via leader-election Leases
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pipeline-operator
+rules:
+  # Pipeline Operator CRDs
+  - apiGroups: ["ai-pipeline.io"]
+    resources:
+      - dataconnectors
+      - dataconnectors/status
+      - tenantworkspaces
+      - tenantworkspaces/status
+      - embeddingconfigs
+      - embeddingconfigs/status
+      - pipelineclusters
+      - pipelineclusters/status
+    verbs: ["get", "list", "watch", "update", "patch"]
+  # Workloads the operator creates/manages
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Per-connector RBAC (no wildcards in resourceNames)
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Strimzi CRs
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkatopics", "kafkausers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # ConfigMaps the operator patches (pipeline-config)
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # Secrets are read-only for the operator
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  # Events for operator status reporting
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # kopf leader-election Leases
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # kopf reads CRDs at startup to validate handler registrations
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["list", "watch"]
+---
+# ── ClusterRoleBinding ────────────────────────────────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pipeline-operator
+subjects:
+  - kind: ServiceAccount
+    name: pipeline-operator-sa
+    namespace: ai-pipeline
+roleRef:
+  kind: ClusterRole
+  name: pipeline-operator
+  apiGroup: rbac.authorization.k8s.io
+---
+# ── Deployment ────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-operator
+  namespace: ai-pipeline
+  labels:
+    app: pipeline-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pipeline-operator
+  template:
+    metadata:
+      labels:
+        app: pipeline-operator
+    spec:
+      serviceAccountName: pipeline-operator-sa
+      # Override SA-level automountServiceAccountToken=false so kopf can use
+      # in-cluster kubeconfig (reads the mounted service-account token).
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: pipeline-operator
+          image: ai-pipeline/pipeline-operator:latest
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# ── NetworkPolicy ─────────────────────────────────────────────────────────────
+# Allow pipeline-operator egress to the Kubernetes API server.
+# The default-deny-all policy blocks all egress; this exemption is required
+# so kopf watch streams can reach the K8s API on port 443/6443.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pipeline-operator-egress
+  namespace: ai-pipeline
+spec:
+  podSelector:
+    matchLabels:
+      app: pipeline-operator
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
