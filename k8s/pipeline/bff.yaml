@@ -1,0 +1,265 @@
+---
+# ── ServiceAccount ─────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bff-sa
+  namespace: ai-pipeline
+automountServiceAccountToken: false
+---
+# ── Role: bff-role (from docs/ai-data-pipeline-security.md §5) ────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bff-role
+  namespace: ai-pipeline
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "patch"]
+  - apiGroups: ["ai-pipeline.io"]
+    resources: ["dataconnectors", "tenantworkspaces", "embeddingconfigs", "pipelineclusters"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bff-rb
+  namespace: ai-pipeline
+subjects:
+  - kind: ServiceAccount
+    name: bff-sa
+    namespace: ai-pipeline
+roleRef:
+  kind: Role
+  name: bff-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ── cert-manager Certificate (BFF server cert; Kong→BFF one-way TLS) ──────────
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: bff-tls
+  namespace: ai-pipeline
+spec:
+  secretName: bff-tls
+  issuerRef:
+    name: pipeline-ca-issuer
+    kind: ClusterIssuer
+  commonName: bff.ai-pipeline.svc.cluster.local
+  dnsNames:
+    - bff.ai-pipeline.svc.cluster.local
+    - bff.ai-pipeline.svc
+    - bff
+  usages:
+    - server auth
+    - client auth
+  duration: 2160h
+  renewBefore: 360h
+---
+# ── Deployment ─────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-mgmt-api
+  namespace: ai-pipeline
+  labels:
+    app: pipeline-mgmt-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pipeline-mgmt-api
+  template:
+    metadata:
+      labels:
+        app: pipeline-mgmt-api
+    spec:
+      serviceAccountName: bff-sa
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bff
+          image: ai-pipeline/bff:latest
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: KEYCLOAK_URL
+              value: "http://keycloak.infrastructure.svc.cluster.local:8080"
+            - name: KEYCLOAK_REALM
+              value: "pipeline"
+            - name: KEYCLOAK_JWKS_URL
+              value: "http://keycloak.infrastructure.svc.cluster.local:8080/realms/pipeline/protocol/openid-connect/certs"
+            - name: KEYCLOAK_ISSUER
+              value: "http://keycloak.infrastructure.svc.cluster.local:8080/realms/pipeline"
+            - name: QUOTA_SERVICE_URL
+              value: "http://quota-service.ai-pipeline.svc:8081"
+            - name: DATABASE_URL
+              value: "postgresql://bff:bff@pipeline-store-rw.infrastructure.svc.cluster.local:5432/pipeline"
+            # TEST_JWT_SECRET: enables HS256 JWT validation for kind testbed (no Keycloak)
+            - name: TEST_JWT_SECRET
+              value: "kind-testbed-smoke-test-secret-do-not-use-in-production"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# ── Service ─────────────────────────────────────────────────────────────────────
+# Port 8080 on Service maps to containerPort 8000 — the existing bff-ingress
+# routes to service:bff:8080.
+apiVersion: v1
+kind: Service
+metadata:
+  name: bff
+  namespace: ai-pipeline
+  labels:
+    app: pipeline-mgmt-api
+spec:
+  selector:
+    app: pipeline-mgmt-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8000
+  type: ClusterIP
+---
+# ── NetworkPolicy: egress from BFF ─────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bff-egress
+  namespace: ai-pipeline
+spec:
+  podSelector:
+    matchLabels:
+      app: pipeline-mgmt-api
+  policyTypes:
+    - Egress
+  egress:
+    # Keycloak Admin REST + PostgreSQL in infrastructure namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: infrastructure
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 5432
+          protocol: TCP
+    # Quota Service gRPC inside ai-pipeline
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quota-service
+      ports:
+        - port: 50051
+          protocol: TCP
+        - port: 8080
+          protocol: TCP
+    # Kubernetes API server (in-cluster config)
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    # DNS
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# ── NetworkPolicy: ingress to BFF ──────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bff-ingress
+  namespace: ai-pipeline
+spec:
+  podSelector:
+    matchLabels:
+      app: pipeline-mgmt-api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kong
+      ports:
+        - port: 8000
+          protocol: TCP
+    # Allow direct port-forward access (from host/debug)
+    - ports:
+        - port: 8000
+          protocol: TCP
+---
+# ── Kong Ingress: /api/* → bff service ────────────────────────────────────────
+# Note: bff-ingress already exists from a prior apply; this is authoritative.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bff-ingress
+  namespace: ai-pipeline
+  labels:
+    app: kong
+  annotations:
+    kubernetes.io/ingress.class: kong
+    konghq.com/plugins: "jwt-auth,extract-tenant-id"
+    konghq.com/strip-path: "false"
+spec:
+  ingressClassName: kong
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: bff
+                port:
+                  number: 8080

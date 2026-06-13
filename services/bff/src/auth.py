@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Optional
 
 import httpx
@@ -23,6 +24,15 @@ def _fetch_jwks(jwks_url: str) -> dict:
 
 def decode_token(token: str, cfg: Optional[Config] = None) -> dict:
     cfg = cfg or _default_config
+    # TEST_JWT_SECRET enables HS256 validation for kind testbed (no Keycloak required)
+    test_secret = os.environ.get("TEST_JWT_SECRET")
+    if test_secret:
+        return jwt.decode(
+            token,
+            test_secret,
+            algorithms=["HS256"],
+            options={"verify_aud": False},
+        )
     jwks = _fetch_jwks(cfg.keycloak_jwks_url)
     return jwt.decode(
         token,
