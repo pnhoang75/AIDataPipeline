@@ -6,11 +6,15 @@ from fastapi.responses import JSONResponse
 
 from admin_endpoints import router as admin_router
 from auth import JWTClaims, require_admin, require_auth
+from tenant_endpoints import router as tenant_router
+from user_endpoints import router as user_router
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Pipeline Management API (BFF)", version="1.0.0")
 app.include_router(admin_router)
+app.include_router(tenant_router)
+app.include_router(user_router)
 
 
 @app.middleware("http")
