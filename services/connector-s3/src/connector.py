@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Iterator, Optional
 
-from prometheus_client import Counter
+from prometheus_client import Counter, REGISTRY
 
 from config import Config, config as default_config
 from events import RawDocumentEvent
@@ -15,11 +15,15 @@ from status import write_source_file_status
 
 logger = logging.getLogger(__name__)
 
-connector_errors_total = Counter(
-    "connector_errors_total",
-    "Total connector errors",
-    ["reason"],
-)
+try:
+    connector_errors_total = Counter(
+        "connector_errors_total",
+        "Total connector errors",
+        ["reason"],
+    )
+except ValueError:
+    # Already registered — multiple connectors imported in the same process (e.g. tests).
+    connector_errors_total = REGISTRY._names_to_collectors["connector_errors_total"]
 
 _KAFKA_RETRY_BASE_MS = 100
 _KAFKA_RETRY_CAP_MS = 30_000
