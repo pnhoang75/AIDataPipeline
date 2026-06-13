@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import api from "@/lib/axios";
+import { AddSourceWizard } from "./wizard/AddSourceWizard";
 
 interface Source {
   id: string;
@@ -65,6 +66,7 @@ function SourceTypeGroup({ type, sources }: { type: string; sources: Source[] })
 }
 
 export function DataSources() {
+  const [showWizard, setShowWizard] = useState(false);
   const { data: sources = [], isLoading, isError } = useQuery<Source[]>({
     queryKey: ["sources"],
     queryFn: () => api.get("/sources").then((r) => r.data),
@@ -87,6 +89,12 @@ export function DataSources() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Data Sources</h1>
+        <button
+          onClick={() => setShowWizard(true)}
+          className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded-md hover:opacity-90"
+        >
+          Add source
+        </button>
       </div>
 
       {isLoading && <p className="text-muted-foreground">Loading data sources…</p>}
@@ -110,6 +118,8 @@ export function DataSources() {
           ))}
         </div>
       )}
+
+      {showWizard && <AddSourceWizard onClose={() => setShowWizard(false)} />}
     </div>
   );
 }
