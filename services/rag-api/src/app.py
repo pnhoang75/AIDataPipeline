@@ -51,6 +51,7 @@ class RagService:
         circuit_breaker: CircuitBreaker,
         cfg: Config = None,
         usage_publisher=None,
+        metadata_publisher=None,
     ):
         self._milvus = milvus_searcher
         self._redis = redis_client
@@ -58,6 +59,7 @@ class RagService:
         self._cb = circuit_breaker
         self._cfg = cfg or _default_config
         self._usage_publisher = usage_publisher
+        self._metadata_publisher = metadata_publisher
 
     def query(self, request: QueryRequest, tenant_id: str) -> QueryResponse:
         _start = _time.time()
@@ -78,13 +80,33 @@ class RagService:
                     _CACHE_HITS.inc()
                     _REQ_LATENCY.observe(_time.time() - _start)
                 cached_results = json.loads(cached_raw)
+                _elapsed_cache_ms = (_time.time() - _start) * 1000
                 if self._usage_publisher is not None:
                     try:
                         self._usage_publisher.publish_rag_query(
                             tenant_id=tenant_id,
-                            duration_ms=(_time.time() - _start) * 1000,
+                            duration_ms=_elapsed_cache_ms,
                             result_count=len(cached_results),
                             cached=True,
+                        )
+                    except Exception:
+                        pass
+                if self._metadata_publisher is not None:
+                    try:
+                        _chunks = [
+                            {"entity_key": r["chunk_id"], "rank": i + 1, "score": r["score"]}
+                            for i, r in enumerate(cached_results)
+                        ]
+                        self._metadata_publisher.publish_rag_query(
+                            query_id=request_id,
+                            tenant_id=tenant_id,
+                            query_text=request.query,
+                            top_k=request.top_k,
+                            source_filter=request.source_filter,
+                            collection=collection,
+                            latency_ms=_elapsed_cache_ms,
+                            cached=True,
+                            retrieved_chunks=_chunks,
                         )
                     except Exception:
                         pass
@@ -152,6 +174,25 @@ class RagService:
                     duration_ms=elapsed_ms,
                     result_count=len(results),
                     cached=False,
+                )
+            except Exception:
+                pass
+        if self._metadata_publisher is not None:
+            try:
+                _chunks = [
+                    {"entity_key": r.chunk_id, "rank": i + 1, "score": r.score}
+                    for i, r in enumerate(results)
+                ]
+                self._metadata_publisher.publish_rag_query(
+                    query_id=request_id,
+                    tenant_id=tenant_id,
+                    query_text=request.query,
+                    top_k=request.top_k,
+                    source_filter=request.source_filter,
+                    collection=collection,
+                    latency_ms=elapsed_ms,
+                    cached=False,
+                    retrieved_chunks=_chunks,
                 )
             except Exception:
                 pass

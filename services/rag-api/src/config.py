@@ -27,6 +27,7 @@ class Config:
 
     kafka_bootstrap: str = os.getenv("KAFKA_BOOTSTRAP", "")
     kafka_usage_topic: str = os.getenv("KAFKA_USAGE_TOPIC", "usage-events")
+    kafka_metadata_topic: str = os.getenv("KAFKA_METADATA_TOPIC", "metadata-events")
 
 
 config = Config()

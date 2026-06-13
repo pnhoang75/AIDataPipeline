@@ -7,11 +7,12 @@ _ENCODING_NAME = "cl100k_base"
 
 
 class Chunk:
-    def __init__(self, text: str, index: int, doc_id: str):
+    def __init__(self, text: str, index: int, doc_id: str, token_count: int = 0):
         self.text = text
         self.index = index
         self.doc_id = doc_id
         self.chunk_id = f"{doc_id}:{index}"
+        self.token_count = token_count
 
 
 class FixedSizeChunker:
@@ -38,8 +39,9 @@ class FixedSizeChunker:
         index = 0
         while start < len(tokens):
             end = min(start + self._chunk_size, len(tokens))
-            chunk_text = enc.decode(tokens[start:end])
-            chunks.append(Chunk(text=chunk_text, index=index, doc_id=doc_id))
+            chunk_tokens = tokens[start:end]
+            chunk_text = enc.decode(chunk_tokens)
+            chunks.append(Chunk(text=chunk_text, index=index, doc_id=doc_id, token_count=len(chunk_tokens)))
             index += 1
             if end == len(tokens):
                 break
