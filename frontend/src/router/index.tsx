@@ -3,6 +3,10 @@ import { RequireRole } from "@/components/RequireRole";
 import { AdminLayout } from "@/layouts/AdminLayout";
 import { UserLayout } from "@/layouts/UserLayout";
 import { AdminDashboard } from "@/pages/admin/Dashboard";
+import { Connectors } from "@/pages/admin/Connectors";
+import { PipelineTuning } from "@/pages/admin/Pipeline";
+import { Tenants } from "@/pages/admin/Tenants";
+import { QuotaManagement } from "@/pages/admin/Quota";
 import { Workspaces } from "@/pages/user/Workspaces";
 import { Unauthorized } from "@/pages/Unauthorized";
 
@@ -20,6 +24,10 @@ export function AppRouter() {
         }
       >
         <Route index element={<AdminDashboard />} />
+        <Route path="connectors" element={<Connectors />} />
+        <Route path="pipeline" element={<PipelineTuning />} />
+        <Route path="tenants" element={<Tenants />} />
+        <Route path="quota" element={<QuotaManagement />} />
         <Route path="*" element={<AdminDashboard />} />
       </Route>
 
