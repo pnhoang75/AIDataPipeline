@@ -1,0 +1,242 @@
+# Base ServiceAccounts and non-connector Roles.
+#
+# connector-sa does NOT have a static shared Role for secrets — the Pipeline
+# Operator creates one per-connector Role with an exact resourceName (no
+# wildcards).  See services/pipeline-operator/operator/rbac.py.
+---
+# ── connector-sa ──────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: connector-sa
+  namespace: ai-pipeline
+automountServiceAccountToken: false
+---
+# connector-sa: read-only access to the shared pipeline-config ConfigMap only.
+# Per-connector secret access is granted via individual Roles created by the
+# Pipeline Operator at DataConnector reconcile time.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: connector-configmap-role
+  namespace: ai-pipeline
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["pipeline-config"]
+    verbs: ["get", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: connector-configmap-rb
+  namespace: ai-pipeline
+subjects:
+  - kind: ServiceAccount
+    name: connector-sa
+    namespace: ai-pipeline
+roleRef:
+  kind: Role
+  name: connector-configmap-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ── doc-processor-sa ──────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: doc-processor-sa
+  namespace: ai-pipeline
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: doc-processor-role
+  namespace: ai-pipeline
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["pipeline-config"]
+    verbs: ["get", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["pipeline-secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: doc-processor-rb
+  namespace: ai-pipeline
+subjects:
+  - kind: ServiceAccount
+    name: doc-processor-sa
+    namespace: ai-pipeline
+roleRef:
+  kind: Role
+  name: doc-processor-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ── embedding-worker-sa ───────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: embedding-worker-sa
+  namespace: ai-pipeline
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: embedding-worker-role
+  namespace: ai-pipeline
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["pipeline-config"]
+    verbs: ["get", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["pipeline-secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: embedding-worker-rb
+  namespace: ai-pipeline
+subjects:
+  - kind: ServiceAccount
+    name: embedding-worker-sa
+    namespace: ai-pipeline
+roleRef:
+  kind: Role
+  name: embedding-worker-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ── rag-api-sa ────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rag-api-sa
+  namespace: ai-pipeline
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rag-api-role
+  namespace: ai-pipeline
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["pipeline-config"]
+    verbs: ["get", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["pipeline-secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rag-api-rb
+  namespace: ai-pipeline
+subjects:
+  - kind: ServiceAccount
+    name: rag-api-sa
+    namespace: ai-pipeline
+roleRef:
+  kind: Role
+  name: rag-api-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ── quota-service-sa ──────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: quota-service-sa
+  namespace: ai-pipeline
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: quota-service-role
+  namespace: ai-pipeline
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["pipeline-config"]
+    verbs: ["get", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["pipeline-secrets"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: quota-service-rb
+  namespace: ai-pipeline
+subjects:
+  - kind: ServiceAccount
+    name: quota-service-sa
+    namespace: ai-pipeline
+roleRef:
+  kind: Role
+  name: quota-service-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ── pipeline-operator-sa ──────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipeline-operator-sa
+  namespace: ai-pipeline
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pipeline-operator-role
+  namespace: ai-pipeline
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "services", "serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkatopics", "kafkausers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["ai-pipeline.io"]
+    resources: ["dataconnectors", "dataconnectors/status"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-operator-rb
+  namespace: ai-pipeline
+subjects:
+  - kind: ServiceAccount
+    name: pipeline-operator-sa
+    namespace: ai-pipeline
+roleRef:
+  kind: Role
+  name: pipeline-operator-role
+  apiGroup: rbac.authorization.k8s.io
