@@ -1,12 +1,12 @@
 {
-  "current_index": 29,
-  "current_session": "3-E",
-  "status": "waiting_for_window_reset",
-  "last_completed": "3-D",
-  "last_completed_at": "2026-06-13T02:32:52Z",
-  "last_attempt_at": "2026-06-13T02:32:52Z",
+  "current_index": 30,
+  "current_session": "3-F",
+  "status": "idle",
+  "last_completed": "3-E",
+  "last_completed_at": "2026-06-13T07:00:00Z",
+  "last_attempt_at": "2026-06-13T07:00:00Z",
   "window_started_at": "2026-06-06T00:00:00Z",
-  "window_reset_at": "2026-06-13T01:30:34Z",
+  "window_reset_at": "2026-06-13T06:30:34Z",
   "retry_count": 0,
   "sessions_completed": [
     "0-A",
@@ -53,7 +53,8 @@
     "3-C",
     "3-C",
     "3-D",
-    "3-D"
+    "3-D",
+    "3-E"
   ],
   "sessions_failed": [
     "2-A"
