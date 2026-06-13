@@ -12,6 +12,7 @@ from watchdog.events import FileSystemEventHandler
 
 from config import Config, config as default_config
 from events import RawDocumentEvent
+from metadata_event import MetadataEventPublisher
 from status import write_source_file_status
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,7 @@ class NFSConnector(SourceConnector):
         redis_client,
         db_conn,
         cfg: Config = None,
+        metadata_producer=None,
     ):
         self._mount_path = mount_path
         self._producer = kafka_producer
@@ -73,6 +75,25 @@ class NFSConnector(SourceConnector):
         self._cfg = cfg or default_config
         self._file_queue: queue.Queue = queue.Queue()
         self._observer: Optional[Observer] = None
+        self._datasource_key = f"{self._cfg.tenant_id}/nfs/{self._mount_path}"
+
+        self._metadata_publisher: Optional[MetadataEventPublisher] = None
+        if metadata_producer is not None:
+            self._metadata_publisher = MetadataEventPublisher(
+                producer=metadata_producer,
+                topic=self._cfg.metadata_events_topic,
+                connector_id=self._cfg.connector_id,
+                tenant_id=self._cfg.tenant_id,
+            )
+            self._metadata_publisher.publish_datasource(
+                entity_key=self._datasource_key,
+                attributes={
+                    "source_type": "nfs",
+                    "endpoint": self._mount_path,
+                    "connector_id": self._cfg.connector_id,
+                },
+            )
+
         self._start_observer()
 
     def _start_observer(self) -> None:
@@ -110,6 +131,22 @@ class NFSConnector(SourceConnector):
                 continue
 
             self._redis.sadd(_known_files_key(self._cfg.connector_id), path)
+
+            if self._metadata_publisher is not None:
+                try:
+                    size_bytes = os.path.getsize(path) if os.path.isfile(path) else 0
+                except OSError:
+                    size_bytes = 0
+                self._metadata_publisher.publish_rawdocument(
+                    entity_key=event.content_ref,
+                    attributes={
+                        "source_path": event.content_ref,
+                        "content_type": event.content_type,
+                        "size_bytes": size_bytes,
+                    },
+                    datasource_entity_key=self._datasource_key,
+                )
+
             yield event
 
     def ack(self, event_id: str) -> None:

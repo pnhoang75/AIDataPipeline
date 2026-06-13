@@ -30,6 +30,7 @@ class Config:
     tenant_id: str = os.getenv("TENANT_ID", "default")
     poll_interval_seconds: float = float(os.getenv("POLL_INTERVAL_SECONDS", "30"))
     nfs_mount_path: str = os.getenv("NFS_MOUNT_PATH", "/mnt/nfs")
+    metadata_events_topic: str = os.getenv("METADATA_EVENTS_TOPIC", "metadata-events")
 
     @property
     def allowed_extensions(self) -> List[str]:

@@ -9,6 +9,7 @@ from prometheus_client import Counter
 
 from config import Config, config as default_config
 from events import RawDocumentEvent
+from metadata_event import MetadataEventPublisher
 from watermark import get_watermark, set_watermark
 from status import write_source_file_status
 
@@ -41,12 +42,32 @@ class S3Connector(SourceConnector):
         redis_client,
         db_conn,
         cfg: Config = None,
+        metadata_producer=None,
     ):
         self._minio = minio_client
         self._producer = kafka_producer
         self._redis = redis_client
         self._db = db_conn
         self._cfg = cfg or default_config
+        self._datasource_key = f"{self._cfg.tenant_id}/s3/{self._cfg.minio_bucket}"
+
+        self._metadata_publisher: Optional[MetadataEventPublisher] = None
+        if metadata_producer is not None:
+            self._metadata_publisher = MetadataEventPublisher(
+                producer=metadata_producer,
+                topic=self._cfg.metadata_events_topic,
+                connector_id=self._cfg.connector_id,
+                tenant_id=self._cfg.tenant_id,
+            )
+            self._metadata_publisher.publish_datasource(
+                entity_key=self._datasource_key,
+                attributes={
+                    "source_type": "s3",
+                    "endpoint": f"s3://{self._cfg.minio_bucket}/",
+                    "connector_id": self._cfg.connector_id,
+                    "file_types": self._cfg.file_types,
+                },
+            )
 
     def poll(self) -> Iterator[RawDocumentEvent]:
         watermark = get_watermark(self._redis, self._cfg.connector_id)
@@ -101,6 +122,18 @@ class S3Connector(SourceConnector):
 
             if new_watermark is None or last_modified > new_watermark:
                 new_watermark = last_modified
+
+            if self._metadata_publisher is not None:
+                self._metadata_publisher.publish_rawdocument(
+                    entity_key=event.content_ref,
+                    attributes={
+                        "source_path": event.content_ref,
+                        "content_type": content_type,
+                        "size_bytes": obj.size or 0,
+                        "etag": obj.etag or "",
+                    },
+                    datasource_entity_key=self._datasource_key,
+                )
 
             yield event
 
