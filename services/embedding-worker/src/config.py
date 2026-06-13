@@ -18,6 +18,7 @@ class Config:
     kafka_usage_topic: str = os.getenv("KAFKA_USAGE_TOPIC", "usage-events")
     kafka_consumer_group: str = os.getenv("KAFKA_CONSUMER_GROUP", "embedding-worker")
     kafka_produce_timeout_ms: int = int(os.getenv("KAFKA_PRODUCE_TIMEOUT_MS", "5000"))
+    metadata_events_topic: str = os.getenv("METADATA_EVENTS_TOPIC", "metadata-events")
 
     embedding_backend: str = os.getenv("EMBEDDING_BACKEND", "local-cpu")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")

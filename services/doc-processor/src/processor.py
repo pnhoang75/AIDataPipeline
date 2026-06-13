@@ -4,25 +4,37 @@ import time
 from typing import Callable, List, Optional
 
 from prometheus_client import Counter
+from prometheus_client import REGISTRY as _prom_registry
 
 from chunker import Chunk, FixedSizeChunker
 from config import Config, config as default_config
 from events import DLQEnvelope, DocumentChunkEvent, RawDocumentEvent
+from metadata_event import MetadataEventPublisher
 from parsers import ParseError, parse
 from status import update_source_file_status
 
 logger = logging.getLogger(__name__)
 
-messages_processed_total = Counter(
+
+def _get_or_create_counter(name, doc, labelnames=()):
+    try:
+        return Counter(name, doc, list(labelnames))
+    except ValueError:
+        # Already registered — module reloaded in tests; retrieve existing metric.
+        bare = name[:-6] if name.endswith("_total") else name
+        return _prom_registry._names_to_collectors[bare]
+
+
+messages_processed_total = _get_or_create_counter(
     "doc_processor_messages_processed_total",
     "Total messages processed",
     ["status"],
 )
-chunks_published_total = Counter(
+chunks_published_total = _get_or_create_counter(
     "doc_processor_chunks_published_total",
     "Total document chunks published",
 )
-dlq_routed_total = Counter(
+dlq_routed_total = _get_or_create_counter(
     "doc_processor_dlq_routed_total",
     "Total messages routed to DLQ",
     ["reason"],
@@ -41,6 +53,7 @@ class DocumentProcessor:
         content_fetcher: Callable[[str], bytes],
         db_conn=None,
         cfg: Config = None,
+        metadata_producer=None,
     ):
         self._consumer = consumer
         self._producer = producer
@@ -53,6 +66,12 @@ class DocumentProcessor:
             overlap=self._cfg.chunk_overlap_tokens,
         )
         self._running = False
+        self._metadata_publisher: Optional[MetadataEventPublisher] = None
+        if metadata_producer is not None:
+            self._metadata_publisher = MetadataEventPublisher(
+                producer=metadata_producer,
+                topic=self._cfg.metadata_events_topic,
+            )
 
     def run(self, poll_timeout_s: float = 1.0) -> None:
         self._consumer.subscribe([self._cfg.kafka_input_topic])
@@ -116,6 +135,18 @@ class DocumentProcessor:
             dlq_routed_total.labels(reason="chunk_publish_failed").inc()
             messages_processed_total.labels(status="chunk_publish_failed").inc()
             return
+
+        if self._metadata_publisher is not None:
+            for chunk in chunks:
+                self._metadata_publisher.publish_document_chunk(
+                    chunk_id=chunk.chunk_id,
+                    doc_id=chunk.doc_id,
+                    chunk_index=chunk.index,
+                    total_chunks=len(chunks),
+                    token_count=chunk.token_count,
+                    text_preview=chunk.text[:100],
+                    tenant_id=event.tenant_id,
+                )
 
         self._consumer.commit(message=msg)
         messages_processed_total.labels(status="success").inc()

@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from backends import EmbeddingBackend, RateLimitError
 from config import Config
 from events import DocumentChunkEvent, DLQEnvelope, EmbeddingEvent
+from metadata_event import MetadataEventPublisher
 from milvus_writer import MilvusWriter
 from status_updater import update_source_file_status
 
@@ -25,6 +26,7 @@ class EmbeddingWorker:
         db_conn,
         cfg: Config,
         usage_producer=None,
+        metadata_producer=None,
     ):
         self._consumer = consumer
         self._backend = backend
@@ -35,6 +37,15 @@ class EmbeddingWorker:
         self._cfg = cfg
         self._usage_producer = usage_producer
         self._running = False
+        self._metadata_publisher = None
+        if metadata_producer is not None:
+            self._metadata_publisher = MetadataEventPublisher(
+                producer=metadata_producer,
+                topic=self._cfg.metadata_events_topic,
+                model_name=self._cfg.embedding_model,
+                embedding_dim=self._cfg.embedding_dim,
+                backend=self._cfg.embedding_backend,
+            )
 
     def _send_to_dlq(
         self, msg, chunk: DocumentChunkEvent, reason: str, detail: str
@@ -186,6 +197,15 @@ class EmbeddingWorker:
                 )
             except Exception as e:
                 logger.warning("Status update failed for %s: %s", chunk.source_id, e)
+
+        if self._metadata_publisher is not None:
+            for chunk, embedding in zip(chunks, embeddings):
+                self._metadata_publisher.publish_embedding(
+                    chunk_id=chunk.chunk_id,
+                    tenant_id=chunk.tenant_id,
+                    embedding=embedding,
+                    collection_name=f"{chunk.tenant_id}_docs",
+                )
 
         self._producer.flush(self._cfg.kafka_produce_timeout_ms / 1000)
 

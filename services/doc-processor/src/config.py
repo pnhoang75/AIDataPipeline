@@ -22,6 +22,7 @@ class Config:
 
     chunk_size_tokens: int = int(os.getenv("CHUNK_SIZE_TOKENS", "512"))
     chunk_overlap_tokens: int = int(os.getenv("CHUNK_OVERLAP_TOKENS", "64"))
+    metadata_events_topic: str = os.getenv("METADATA_EVENTS_TOPIC", "metadata-events")
 
     postgres_dsn: str = _read_secret(
         "/etc/secrets/postgres-dsn",
