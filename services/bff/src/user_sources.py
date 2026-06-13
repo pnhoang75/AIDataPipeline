@@ -98,12 +98,14 @@ def _validate_browse_path(path: str, allowed_prefix: str) -> None:
 
 @router.post("/create", response_model=SourceCreateResponse, status_code=201)
 async def create_source(body: UserSourceCreate, claims: JWTClaims = Depends(require_auth)):
-    quota = await quota_client.check_quota(claims.org_id, "CONNECTOR_COUNT")
-    if not quota["allowed"]:
-        raise HTTPException(
-            status_code=402,
-            detail={"error": "QUOTA_EXCEEDED", "message": "Connector quota exceeded for this tier"},
-        )
+    # Pro and Enterprise tiers have unlimited connectors per multitenancy doc.
+    if claims.license_type not in ("pro", "enterprise"):
+        quota = await quota_client.check_quota(claims.org_id, "CONNECTOR_COUNT")
+        if not quota["allowed"]:
+            raise HTTPException(
+                status_code=402,
+                detail={"error": "QUOTA_EXCEEDED", "message": "Connector quota exceeded for this tier"},
+            )
 
     connector_id = str(uuid.uuid4())
     cm_name = _cm_name(connector_id)
