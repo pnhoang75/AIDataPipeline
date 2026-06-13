@@ -1,9 +1,9 @@
 {
   "current_index": 31,
   "current_session": "3-G",
-  "status": "pending",
+  "status": "session_complete",
   "last_completed": "3-F",
-  "last_completed_at": "2026-06-13T08:00:00Z",
+  "last_completed_at": "2026-06-13T07:23:20Z",
   "last_attempt_at": "2026-06-13T08:00:00Z",
   "window_started_at": "2026-06-06T00:00:00Z",
   "window_reset_at": "2026-06-13T06:30:34Z",
@@ -56,6 +56,7 @@
     "3-D",
     "3-E",
     "3-E",
+    "3-F",
     "3-F"
   ],
   "sessions_failed": [
