@@ -9,8 +9,11 @@ from __future__ import annotations
 
 
 def connector_secret_name(connector_name: str) -> str:
-    """Canonical secret name for a connector's credentials."""
-    return f"{connector_name}-creds"
+    """Canonical secret name for a connector's credentials.
+
+    Matches the BFF naming convention: connector-{slug}-creds.
+    """
+    return f"connector-{connector_name}-creds"
 
 
 def make_connector_role(connector_name: str, namespace: str) -> dict:
