@@ -29,6 +29,17 @@ _client: K8sClient = K8sClient()
 _KAFKA_CLUSTER = "ai-pipeline-kafka"
 _KAFKA_TOPIC = "raw-documents"
 _CONNECTOR_SA = "connector-sa"
+# Nearest-minute CronJob approximation of "every 30 s" (K8s minimum is 1 min)
+_UPLOAD_WATCHER_SCHEDULE = "* * * * *"
+
+# Expose TemporaryError so tests don't need to import kopf directly.
+if _kopf_available:
+    TemporaryError = _kopf.TemporaryError
+else:
+    class TemporaryError(RuntimeError):  # type: ignore[no-redef]
+        def __init__(self, message: str, delay: int = 0) -> None:
+            super().__init__(message)
+            self.delay = delay
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +111,71 @@ async def delete_connector(
 
 
 # ---------------------------------------------------------------------------
+# TenantWorkspace reconcile (create / update)
+# ---------------------------------------------------------------------------
+
+async def reconcile_workspace(
+    spec: dict,
+    name: str,
+    namespace: str,
+    patch: object,
+    **kwargs,
+) -> None:
+    """Provision upload-watcher CronJob for a TenantWorkspace."""
+    tenant_id = spec["tenantId"]
+    await _client.apply_cronjob(
+        f"upload-watcher-{tenant_id}", namespace, _UPLOAD_WATCHER_SCHEDULE, {}
+    )
+    patch.status["state"] = "Provisioned"  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
+# TenantWorkspace delete
+# ---------------------------------------------------------------------------
+
+async def delete_workspace(
+    spec: dict,
+    name: str,
+    namespace: str,
+    **kwargs,
+) -> None:
+    """Remove upload-watcher CronJob when TenantWorkspace is deleted."""
+    tenant_id = spec.get("tenantId", "")
+    await _client.delete_cronjob(f"upload-watcher-{tenant_id}", namespace)
+
+
+# ---------------------------------------------------------------------------
+# EmbeddingConfig reconcile (update only — dimension-change guard)
+# ---------------------------------------------------------------------------
+
+async def reconcile_embedding(
+    spec: dict,
+    old: dict,
+    new: dict,
+    namespace: str,
+    patch: object,
+    **kwargs,
+) -> None:
+    """Apply EmbeddingConfig changes; block dimension changes unless reindexConfirmed."""
+    old_dim = (old.get("spec") or {}).get("dimension")
+    new_dim = (new.get("spec") or {}).get("dimension")
+    if old_dim and new_dim and old_dim != new_dim and not spec.get("reindexConfirmed"):
+        patch.status["state"] = "BlockedDimensionChange"  # type: ignore[index]
+        raise TemporaryError(
+            f"Dimension change {old_dim}→{new_dim} requires re-index. "
+            "Set spec.reindexConfirmed: true to proceed.",
+            delay=60,
+        )
+    await _client.patch_configmap("pipeline-config", namespace, {
+        "EMBEDDING_BACKEND": spec.get("backend", ""),
+        "EMBEDDING_MODEL": spec.get("model", ""),
+        "EMBEDDING_DEVICE": spec.get("device", ""),
+    })
+    await _client.rollout_restart("deployment", "embedding-worker", namespace)
+    patch.status["state"] = "Applied"  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -130,4 +206,23 @@ if _kopf_available:
     async def handle_connector_delete(spec, name, namespace, **kwargs):
         await delete_connector(
             spec=spec, name=name, namespace=namespace, **kwargs
+        )
+
+    @_kopf.on.create("ai-pipeline.io", "v1alpha1", "tenantworkspaces")  # type: ignore[misc]
+    @_kopf.on.update("ai-pipeline.io", "v1alpha1", "tenantworkspaces")
+    async def handle_workspace_create_update(spec, name, namespace, patch, **kwargs):
+        await reconcile_workspace(
+            spec=spec, name=name, namespace=namespace, patch=patch, **kwargs
+        )
+
+    @_kopf.on.delete("ai-pipeline.io", "v1alpha1", "tenantworkspaces")
+    async def handle_workspace_delete(spec, name, namespace, **kwargs):
+        await delete_workspace(
+            spec=spec, name=name, namespace=namespace, **kwargs
+        )
+
+    @_kopf.on.update("ai-pipeline.io", "v1alpha1", "embeddingconfigs", field="spec")  # type: ignore[misc]
+    async def handle_embedding_update(spec, old, new, namespace, patch, **kwargs):
+        await reconcile_embedding(
+            spec=spec, old=old, new=new, namespace=namespace, patch=patch, **kwargs
         )
