@@ -1,10 +1,10 @@
 {
-  "current_index": 33,
-  "current_session": "4-B",
-  "status": "running",
-  "last_completed": "4-A",
-  "last_completed_at": "2026-06-13T08:17:29Z",
-  "last_attempt_at": "2026-06-13T08:17:29Z",
+  "current_index": 34,
+  "current_session": "4-C",
+  "status": "pending",
+  "last_completed": "4-B",
+  "last_completed_at": "2026-06-13T08:30:00Z",
+  "last_attempt_at": "2026-06-13T08:30:00Z",
   "window_started_at": "2026-06-06T00:00:00Z",
   "window_reset_at": "2026-06-13T06:30:34Z",
   "retry_count": 0,
@@ -61,7 +61,8 @@
     "3-G",
     "3-G",
     "4-A",
-    "4-A"
+    "4-A",
+    "4-B"
   ],
   "sessions_failed": [
     "2-A"
