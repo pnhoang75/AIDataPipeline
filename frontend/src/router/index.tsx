@@ -8,6 +8,8 @@ import { PipelineTuning } from "@/pages/admin/Pipeline";
 import { Tenants } from "@/pages/admin/Tenants";
 import { QuotaManagement } from "@/pages/admin/Quota";
 import { Workspaces } from "@/pages/user/Workspaces";
+import { DataSources } from "@/pages/user/DataSources";
+import { FileBrowser } from "@/pages/user/FileBrowser";
 import { Unauthorized } from "@/pages/Unauthorized";
 
 export function AppRouter() {
@@ -40,6 +42,8 @@ export function AppRouter() {
         }
       >
         <Route index element={<Workspaces />} />
+        <Route path="sources" element={<DataSources />} />
+        <Route path="files" element={<FileBrowser />} />
         <Route path="*" element={<Workspaces />} />
       </Route>
 
