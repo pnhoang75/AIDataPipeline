@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from admin_endpoints import router as admin_router
 from auth import JWTClaims, require_admin, require_auth
+from lineage_endpoints import router as lineage_router
 from tenant_endpoints import router as tenant_router
 from user_endpoints import router as user_router
 from user_sources import router as user_sources_router
@@ -17,6 +18,7 @@ app.include_router(admin_router)
 app.include_router(tenant_router)
 app.include_router(user_router)
 app.include_router(user_sources_router)
+app.include_router(lineage_router)
 
 
 @app.middleware("http")

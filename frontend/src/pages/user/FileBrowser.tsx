@@ -17,6 +17,12 @@ interface FileStatus {
   chunk_count: number | null;
 }
 
+interface LineageRow {
+  entity_type: string;
+  count: number;
+  entity_keys: string[];
+}
+
 const STATUS_STYLES: Record<string, string> = {
   indexed: "bg-green-100 text-green-800",
   processing: "bg-yellow-100 text-yellow-800",
@@ -48,6 +54,7 @@ function fileName(path: string): string {
 export function FileBrowser() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const perPage = 50;
 
   const { data: workspaces = [] } = useQuery<Workspace[]>({
@@ -70,9 +77,19 @@ export function FileBrowser() {
     enabled: Boolean(workspaceId),
   });
 
+  const { data: lineage = [] } = useQuery<LineageRow[]>({
+    queryKey: ["file-lineage", selectedPath],
+    queryFn: () =>
+      api
+        .get(`/lineage/downstream/${encodeURIComponent(selectedPath!)}`)
+        .then((r) => r.data),
+    enabled: Boolean(selectedPath),
+  });
+
   function selectWorkspace(id: string) {
     setSearchParams({ workspace: id });
     setPage(1);
+    setSelectedPath(null);
   }
 
   return (
@@ -131,7 +148,11 @@ export function FileBrowser() {
               </thead>
               <tbody className="divide-y divide-border">
                 {files.map((f) => (
-                  <tr key={f.id} className="hover:bg-muted/20">
+                  <tr
+                    key={f.id}
+                    onClick={() => setSelectedPath(selectedPath === f.file_path ? null : f.file_path)}
+                    className={`cursor-pointer hover:bg-muted/20 ${selectedPath === f.file_path ? "bg-accent/40" : ""}`}
+                  >
                     <td className="px-4 py-3 font-medium">{fileName(f.file_path)}</td>
                     <td className="px-4 py-3 text-muted-foreground text-xs truncate max-w-xs" title={f.file_path}>
                       {f.file_path}
@@ -166,6 +187,26 @@ export function FileBrowser() {
               </button>
             </div>
           </div>
+
+          {selectedPath && (
+            <div className="mt-6 rounded-md border border-border p-4">
+              <h2 className="text-sm font-semibold mb-2">
+                Lineage — <span className="font-mono text-xs text-muted-foreground">{selectedPath}</span>
+              </h2>
+              {lineage.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No downstream entities found.</p>
+              ) : (
+                <div className="flex gap-6">
+                  {lineage.map((row) => (
+                    <div key={row.entity_type} className="text-center">
+                      <p className="text-2xl font-bold">{row.count}</p>
+                      <p className="text-xs text-muted-foreground">{row.entity_type}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

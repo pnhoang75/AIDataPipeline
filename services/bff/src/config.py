@@ -24,6 +24,10 @@ class Config:
         "QUOTA_SERVICE_URL",
         "http://quota-service.ai-pipeline.svc:8081",
     )
+    metadata_service_url: str = os.environ.get(
+        "METADATA_SERVICE_URL",
+        "http://metadata-service.ai-pipeline.svc:8000",
+    )
     database_url: str = os.environ.get(
         "DATABASE_URL",
         "postgresql://bff:bff@postgres.infrastructure.svc:5432/pipeline",

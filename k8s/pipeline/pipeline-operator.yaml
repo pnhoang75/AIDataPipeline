@@ -118,6 +118,8 @@ spec:
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
+            - name: METADATA_SERVICE_URL
+              value: "http://metadata-service.ai-pipeline.svc:8000"
           volumeMounts:
             - name: tmp
               mountPath: /tmp

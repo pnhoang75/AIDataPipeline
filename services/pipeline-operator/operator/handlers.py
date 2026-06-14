@@ -10,6 +10,9 @@ Import path note: this module supports two import modes:
 """
 from __future__ import annotations
 
+import logging
+import os
+
 try:
     import kopf as _kopf
     _kopf_available = True
@@ -23,8 +26,14 @@ except ImportError:
     from k8s_client import K8sClient  # type: ignore[no-redef]
     from rbac import make_connector_role, make_connector_role_binding  # type: ignore[no-redef]
 
+logger = logging.getLogger(__name__)
+
 # Module-level singleton; replace with AsyncMock in unit tests.
 _client: K8sClient = K8sClient()
+
+_METADATA_SERVICE_URL = os.environ.get(
+    "METADATA_SERVICE_URL", "http://metadata-service.ai-pipeline.svc:8000"
+)
 
 _KAFKA_CLUSTER = "ai-pipeline-kafka"
 _KAFKA_TOPIC = "raw-documents"
@@ -166,6 +175,24 @@ async def reconcile_embedding(
             "Set spec.reindexConfirmed: true to proceed.",
             delay=60,
         )
+    if _METADATA_SERVICE_URL and spec.get("tenantId"):
+        try:
+            import httpx
+            async with httpx.AsyncClient() as hclient:
+                await hclient.post(
+                    f"{_METADATA_SERVICE_URL}/api/schema-versions",
+                    json={
+                        "tenant_id": spec["tenantId"],
+                        "embedding_model": spec.get("model", ""),
+                        "embedding_dimension": spec.get("dimension", 384),
+                        "embedding_backend": spec.get("backend", "local-cpu"),
+                        "created_by": "pipeline-operator",
+                    },
+                    timeout=10.0,
+                )
+        except Exception as exc:
+            logger.warning("failed to record SchemaVersion in metadata service: %s", exc)
+
     await _client.patch_configmap("pipeline-config", namespace, {
         "EMBEDDING_BACKEND": spec.get("backend", ""),
         "EMBEDDING_MODEL": spec.get("model", ""),
