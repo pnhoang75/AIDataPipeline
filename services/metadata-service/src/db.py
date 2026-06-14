@@ -1,8 +1,30 @@
 import json
 import logging
+import uuid as _uuid
+from datetime import datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
+import psycopg2.extras
+
 logger = logging.getLogger(__name__)
+
+
+def _row_to_dict(row) -> Dict[str, Any]:
+    """Convert a psycopg2 row (dict-like) to a JSON-serializable dict."""
+    result: Dict[str, Any] = {}
+    for k, v in row.items():
+        if isinstance(v, _uuid.UUID):
+            result[k] = str(v)
+        elif isinstance(v, datetime):
+            result[k] = v.isoformat()
+        elif isinstance(v, Decimal):
+            result[k] = float(v)
+        elif isinstance(v, list):
+            result[k] = [str(x) if isinstance(x, _uuid.UUID) else x for x in v]
+        else:
+            result[k] = v
+    return result
 
 
 def upsert_entity(
@@ -115,3 +137,158 @@ def update_entity_quality_failed(conn, entity_id: str) -> None:
             """,
             (entity_id,),
         )
+
+
+def query_upstream(conn, chunk_id: str) -> List[Dict[str, Any]]:
+    """Recursive CTE: walk upstream from entity_key through lineage edges."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            WITH RECURSIVE upstream_chain AS (
+                SELECT e.id, e.entity_type, e.entity_key, e.attributes,
+                       NULL::TEXT AS relationship, 0 AS depth
+                FROM metadata.entities e
+                WHERE e.entity_key = %s
+
+                UNION ALL
+
+                SELECT parent.id, parent.entity_type, parent.entity_key, parent.attributes,
+                       l.relationship, chain.depth + 1
+                FROM metadata.entities parent
+                JOIN metadata.lineage l ON l.upstream_id = parent.id
+                JOIN upstream_chain chain ON l.downstream_id = chain.id
+                WHERE chain.depth < 5
+            )
+            SELECT entity_type, entity_key, attributes,
+                   relationship, depth
+            FROM upstream_chain
+            ORDER BY depth DESC
+            """,
+            (chunk_id,),
+        )
+        return [_row_to_dict(r) for r in cur.fetchall()]
+
+
+def query_downstream(conn, tenant_id: str, source_path: str) -> List[Dict[str, Any]]:
+    """Recursive CTE: walk downstream from a RawDocument identified by source_path."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            WITH RECURSIVE downstream AS (
+                SELECT e.id, e.entity_type, e.entity_key, 0 AS depth
+                FROM metadata.entities e
+                WHERE e.entity_type = 'RawDocument'
+                  AND e.attributes->>'source_path' = %s
+                  AND e.tenant_id = %s::uuid
+
+                UNION ALL
+
+                SELECT child.id, child.entity_type, child.entity_key, d.depth + 1
+                FROM metadata.entities child
+                JOIN metadata.lineage l ON l.downstream_id = child.id
+                JOIN downstream d ON l.upstream_id = d.id
+                WHERE d.depth < 4
+            )
+            SELECT entity_type,
+                   COUNT(*)             AS count,
+                   ARRAY_AGG(entity_key) AS entity_keys
+            FROM downstream
+            WHERE depth > 0
+            GROUP BY entity_type
+            """,
+            (source_path, tenant_id),
+        )
+        return [_row_to_dict(r) for r in cur.fetchall()]
+
+
+def query_stale(conn, tenant_id: str) -> List[Dict[str, Any]]:
+    """Return embeddings that were generated with an outdated schema version."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT e.entity_key AS embedding_id,
+                   e.attributes->>'chunk_id'   AS chunk_id,
+                   e.attributes->>'model_name' AS model_name,
+                   sv.version_number           AS schema_version,
+                   sv.embedding_model          AS old_model,
+                   cv.embedding_model          AS current_model
+            FROM metadata.entities e
+            JOIN metadata.schema_versions sv ON sv.id = e.schema_version_id
+            JOIN metadata.schema_versions cv ON cv.tenant_id = sv.tenant_id
+                                             AND cv.is_current = TRUE
+            WHERE e.entity_type = 'Embedding'
+              AND e.tenant_id = %s::uuid
+              AND sv.id <> cv.id
+            ORDER BY sv.version_number
+            """,
+            (tenant_id,),
+        )
+        return [_row_to_dict(r) for r in cur.fetchall()]
+
+
+def query_provenance(conn, query_id: str) -> List[Dict[str, Any]]:
+    """Return full provenance for each retrieved chunk for a RAG query."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT
+                qr.rank,
+                qr.score,
+                chunk.entity_key                   AS chunk_id,
+                chunk.attributes->>'text_preview'  AS text_preview,
+                chunk.attributes->>'page_number'   AS page,
+                doc.attributes->>'source_path'     AS source_file,
+                doc.attributes->>'content_type'    AS format,
+                sv.embedding_model                 AS embedding_model,
+                sv.chunk_size                      AS chunk_size,
+                pr.started_at                      AS indexed_at
+            FROM metadata.query_results qr
+            JOIN metadata.entities chunk   ON chunk.id = qr.chunk_entity_id
+            JOIN metadata.lineage l_chunk  ON l_chunk.downstream_id = chunk.id
+                                          AND l_chunk.relationship = 'chunked_into'
+            JOIN metadata.entities doc     ON doc.id = l_chunk.upstream_id
+            JOIN metadata.schema_versions sv ON sv.id = chunk.schema_version_id
+            JOIN metadata.pipeline_runs pr ON pr.id = chunk.pipeline_run_id
+            WHERE qr.query_id = %s::uuid
+            ORDER BY qr.rank
+            """,
+            (query_id,),
+        )
+        return [_row_to_dict(r) for r in cur.fetchall()]
+
+
+def query_runs(conn, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Return pipeline run history, optionally filtered by tenant."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT id, tenant_id, pipeline_type, connector_id, status,
+                   started_at, finished_at, entities_processed,
+                   entities_failed, bytes_processed
+            FROM metadata.pipeline_runs
+            WHERE (%s IS NULL OR tenant_id = %s::uuid)
+            ORDER BY started_at DESC
+            LIMIT 100
+            """,
+            (tenant_id, tenant_id),
+        )
+        return [_row_to_dict(r) for r in cur.fetchall()]
+
+
+def query_quality(conn, tenant_id: str) -> List[Dict[str, Any]]:
+    """Return failed/warned quality checks for a tenant."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT dq.id, dq.entity_id, dq.check_name, dq.status,
+                   dq.value, dq.threshold, dq.message, dq.checked_at,
+                   e.entity_type, e.entity_key
+            FROM metadata.data_quality dq
+            JOIN metadata.entities e ON e.id = dq.entity_id
+            WHERE e.tenant_id = %s::uuid
+              AND dq.status IN ('failed', 'warning')
+            ORDER BY dq.checked_at DESC
+            """,
+            (tenant_id,),
+        )
+        return [_row_to_dict(r) for r in cur.fetchall()]

@@ -1,1 +1,13 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 3-C is complete. Here's what was built:
+
+**New files:**
+- `services/bff/src/keycloak_client.py` — Keycloak Admin REST API client (list/create organizations, manage members, update licenses)
+- `services/bff/src/quota_client.py` — Quota Service HTTP client (get usage, set overrides)
+- `services/bff/src/db_client.py` — PostgreSQL async client for workspaces, workspace sources, and file status tables
+- `services/bff/src/tenant_endpoints.py` — Admin routes: `GET/POST /api/admin/tenants`, `PATCH /api/admin/tenants/{id}/license`, `GET/POST /api/admin/tenants/{id}/users`, `GET /api/admin/quota`, `PUT /api/admin/quota/{tenant_id}/{metric}`
+- `services/bff/src/user_endpoints.py` — User routes: workspaces CRUD, sources listing, workspace sources management, file browser, reindex
+- `tests/unit/bff/test_user_endpoints.py` — 31 unit tests including `test_bff_user_workspace_scoped_to_tenant` and full tenant scoping coverage
+
+**Updated files:** `config.py` (Keycloak admin + DB config), `app.py` (registers new routers)
+
+All 75 BFF unit tests pass (31 new + 44 existing). Sentinel `.sessions-done/3-C` created.

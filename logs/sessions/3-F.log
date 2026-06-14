@@ -1,1 +1,15 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 3-F is complete. Here's what was built:
+
+**5 Admin screens created in `frontend/src/pages/admin/`:**
+
+1. **Dashboard.tsx** — Polls `GET /api/admin/pipeline/status` every 15s, shows a table of pods with name, status badge (green/red), and ready indicator.
+
+2. **Connectors.tsx** — Full CRUD table: list all connectors, create via modal (name, source type, JSON config, paused toggle), edit inline, delete with confirmation dialog. Uses optimistic query invalidation.
+
+3. **Pipeline.tsx** — Tuning form for chunk_size, chunk_overlap, embedding backend (dropdown), Milvus index type, and nlist. GET on load, PUT on save with success/error feedback.
+
+4. **Tenants.tsx** — Expandable rows showing tenant name, license tier (inline editable dropdown), per-tenant quota progress bars, and expandable user list with email invite form.
+
+5. **Quota.tsx** — Per-tenant grouped table showing metric, current usage, limit, visual progress bar (green/yellow/red), and inline override editing (click Override → number input → Set).
+
+The router was updated to wire all 5 routes, and AdminLayout upgraded to use `NavLink` for active-state highlighting.

@@ -1,1 +1,17 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 4-D is complete. Here's a summary of what was implemented:
+
+**New files created:**
+- `services/bff/src/ssrf_validator.py` — validates endpoints against RFC-1918/loopback/file-scheme/k8s-.svc blocking
+- `services/bff/src/kafka_client.py` — async `publish_event()` for metadata-events topic
+- `services/bff/src/minio_client.py` — async `upload_file()` for MinIO storage
+- `services/bff/src/user_sources.py` — 7 endpoints: POST /create, /test (SSRF), /upload (skip quota + publish Kafka event), /{id}/pause, /{id}/resume, DELETE /{id} (ownership), GET /{id}/browse/{path} (NFS path traversal guard)
+- `tests/unit/bff/test_user_sources.py` — 32 unit tests covering all endpoints
+- `tests/security/test_ssrf.py` — 16 security tests covering §7.2 (SSRF full table), §7.3 (NFS traversal full table), §7.5 (ownership)
+
+**Modified files:**
+- `services/bff/src/quota_client.py` — added `check_quota()` with increment-on-allow
+- `services/bff/src/k8s_client.py` — added `browse_nfs_path()`
+- `services/bff/src/app.py` — registered `user_sources_router`
+- `services/bff/requirements.txt` — added `python-multipart`
+
+**Result:** 48/48 tests pass.

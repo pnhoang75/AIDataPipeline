@@ -1,1 +1,14 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 2-J is complete. Here's a summary of what was done:
+
+**Deliverables:**
+
+1. **`k8s/pipeline/rbac.yaml`** — Base RBAC manifest for all pipeline ServiceAccounts. The connector-sa gets only ConfigMap access statically; per-connector secret access is created dynamically by the operator (no wildcards anywhere).
+
+2. **`services/pipeline-operator/operator/rbac.py`** — Per-connector Role/RoleBinding creation logic with:
+   - `make_connector_role(connector_name, namespace)` → creates a Role with `resourceNames: ["<connector>-creds"]` (exact name, never `"kafka-connector-*"`)
+   - `make_connector_role_binding(connector_name, service_account, namespace)` → binds connector-sa to its per-connector Role
+   - `audit_role_for_wildcards(role)` → assertion helper for CI
+
+3. **`services/pipeline-operator/operator/auth.py`** — JWT auth helpers (tenant ID extraction from `org_id` claim, expiry check, role enforcement, tenant scope enforcement) to be used by BFF in Phase 3.
+
+4. **`tests/security/test_rbac.py`** — 28 passing tests covering §7.1 auth/authz and the RBAC no-wildcards invariant, including `test_connector_role_lists_exact_secret_names`.

@@ -1,1 +1,10 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 3-A is complete. Here's what was built:
+
+**services/bff/src/**
+- `config.py` — `Config` dataclass with Keycloak JWKS URL and issuer from env vars
+- `models.py` — `JWTClaims` dataclass and `ErrorEnvelope` Pydantic model
+- `auth.py` — `decode_token` (JWKS-backed RS256 validation), `require_auth` dependency (validates Bearer + tenant scoping), `require_admin` dependency (pipeline-admin role check)
+- `app.py` — FastAPI app with request-ID middleware, error envelope exception handlers, `/api/health`, `/api/whoami`, `/api/admin/health`
+- `main.py` — uvicorn entrypoint
+
+**tests/unit/bff/test_auth_middleware.py** — 15 tests covering: missing/malformed auth header, invalid/expired JWT, missing `org_id` claim, valid JWT with/without `X-Tenant-ID`, tenant mismatch → 403, tenant always derived from JWT, RBAC (developer denied admin, pipeline-admin allowed), error envelope `request_id` field, unauthenticated health endpoint.

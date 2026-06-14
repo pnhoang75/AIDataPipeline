@@ -1,0 +1,17 @@
+Session 2-I is complete. Here's what was implemented:
+
+**OpenMeter deployment:**
+- Added `usage-events` KafkaTopic CR (4 partitions, 30-day retention)
+- Created `k8s/pipeline/openmeter.yaml` with Deployment, ConfigMap (meters: `api_calls`, `gpu_seconds`, `bytes_ingested`), Service, NetworkPolicy in `infrastructure` namespace
+
+**CloudEvent publishing:**
+- RAG API: new `services/rag-api/src/events.py` with `UsagePublisher` class; publishes `pipeline.rag.query` CloudEvents on every query (both cache hit and miss); wired into `RagService` as optional `usage_publisher` parameter
+- Embedding Worker: added `_publish_usage_event()` method publishing `pipeline.embedding.batch` CloudEvents with timed `gpu_seconds` per tenant after each successful batch
+
+**Pod security hardening (secrets as files):**
+- Added `_read_secret(file_path, env_var, default)` helper to all service configs
+- All Deployment specs now mount `pipeline-secrets` as a volume at `/etc/secrets/` with individual key files — removed `secretKeyRef` env vars for `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `POSTGRES_DSN`
+- `quota-service` mounts `quota-db-app` secret as a volume at `/etc/secrets/quota-db/`
+- All services already had `readOnlyRootFilesystem`, `runAsNonRoot`, `seccompProfile: RuntimeDefault` in place
+
+**Tests:** 16 RAG API tests + 23 embedder tests all pass, plus all connector/processor/quota/security/OPA tests.

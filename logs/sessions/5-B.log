@@ -1,1 +1,15 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 5-B is complete. Here's a summary of what was implemented:
+
+**Changes made:**
+
+1. **`services/connector-s3/src/metadata_event.py`** (new) — `MetadataEventPublisher` class and `build_cloudevent()` helper that builds CloudEvents spec 1.0 envelopes and publishes them to the `metadata-events` Kafka topic. Publish failures are silently swallowed so metadata errors never block ingestion.
+
+2. **`services/connector-nfs/src/metadata_event.py`** (new) — identical copy for the NFS connector.
+
+3. **`services/connector-s3/src/connector.py`** — `S3Connector.__init__` now accepts an optional `metadata_producer` parameter; on init it publishes a `DataSource` CloudEvent (`entity_key = "{tenant_id}/s3/{bucket}"`). After each successful file publish to `raw-documents`, it publishes a `RawDocument` CloudEvent with a `discovered_in` lineage edge pointing to the DataSource.
+
+4. **`services/connector-nfs/src/connector.py`** — same pattern for `NFSConnector` (`entity_key = "{tenant_id}/nfs/{mount_path}"`).
+
+5. **`services/connector-s3/src/config.py`** and **`services/connector-nfs/src/config.py`** — added `metadata_events_topic` env var (default: `"metadata-events"`).
+
+6. **`tests/unit/connectors/test_metadata_events.py`** (new) — 28 unit tests covering: CloudEvent structure, publisher DataSource/RawDocument events, S3 and NFS connector startup events, per-file RawDocument events, `discovered_in` lineage edges, and graceful failure handling. Uses careful `sys.modules` isolation to test both connectors in the same file without cross-contamination.

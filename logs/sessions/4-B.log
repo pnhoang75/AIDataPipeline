@@ -1,1 +1,12 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 4-B is complete. Here's what was implemented:
+
+**TenantWorkspace reconcile** (`reconcile_workspace` / `delete_workspace`):
+- On create/update: applies `upload-watcher-{tenant_id}` CronJob (every minute schedule, K8s minimum), sets status `Provisioned`
+- On delete: removes the CronJob
+
+**EmbeddingConfig reconcile** (`reconcile_embedding`):
+- Dimension-change guard: if `old_dim != new_dim` and `reindexConfirmed` is not `true`, sets status `BlockedDimensionChange` and raises `TemporaryError`
+- With `reindexConfirmed: true`: proceeds to `patch_configmap` + `rollout_restart`, sets status `Applied`
+- `TemporaryError` exported from `handlers` module so tests don't need to import kopf directly
+
+All 4 new tests pass (7 total operator unit tests pass), sentinel `.sessions-done/4-B` created.

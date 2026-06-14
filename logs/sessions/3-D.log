@@ -1,1 +1,12 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 3-D is complete. Here's what was accomplished:
+
+**Delivered:**
+- `services/bff/requirements.txt` — added `asyncpg>=0.29.0`
+- `services/bff/src/auth.py` — added `TEST_JWT_SECRET` env var support for HS256 JWT validation (testbed without Keycloak)
+- `k8s/pipeline/bff.yaml` — full BFF deployment: `bff-sa` ServiceAccount, `bff-role` Role + `bff-rb` RoleBinding, cert-manager `bff-tls` Certificate, `pipeline-mgmt-api` Deployment, `bff` Service (8080→8000), egress/ingress NetworkPolicies, and `bff-ingress` Kong Ingress for `/api/*`
+- `scripts/smoke_test_bff.py` — smoke test script using HS256 JWTs
+
+**Smoke test results:**
+- Admin JWT → `GET /api/admin/pipeline/status` → **200 OK** (auth worked, K8s pod list returned)
+- User JWT → `GET /api/workspaces` → **auth passed** (500 from DB unavailable in testbed, not 401/403)
+- Done-check: `kubectl get pods -n ai-pipeline -l app=pipeline-mgmt-api` → 1/1 Running

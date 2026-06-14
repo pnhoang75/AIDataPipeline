@@ -1,1 +1,12 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 3-B is complete. Here's what was implemented:
+
+**New files:**
+- `services/bff/src/k8s_client.py` — async wrapper over `kubernetes-asyncio` using lazy imports (so tests run without the package installed)
+- `services/bff/src/admin_endpoints.py` — FastAPI router with all session 3-B endpoints:
+  - `GET /api/admin/pipeline/status` — lists K8s pods with component label
+  - `GET/POST /api/admin/connectors` — list and create connectors (ConfigMap + DataConnector CR)
+  - `PATCH/DELETE /api/admin/connectors/{id}` — update/delete with tenant ownership check
+  - `GET/PUT /api/admin/pipeline/config` — read/write pipeline config ConfigMap
+- `tests/unit/bff/test_admin_endpoints.py` — 29 unit tests, all passing, with mocked `k8s_client` functions
+
+**Modified:** `app.py` (included admin router), `requirements.txt` (added `kubernetes-asyncio>=29.0.0`), `docs/execution-progress.json` (advanced to 3-C)

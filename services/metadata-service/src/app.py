@@ -1,9 +1,19 @@
 import logging
 import threading
+from typing import Generator, List, Optional
 
-from fastapi import FastAPI
+import psycopg2
+from fastapi import Depends, FastAPI, HTTPException
 
 from config import config
+from db import (
+    query_downstream,
+    query_provenance,
+    query_quality,
+    query_runs,
+    query_stale,
+    query_upstream,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -11,9 +21,49 @@ app = FastAPI(title="Metadata Service", version="1.0.0")
 _consumer_thread: threading.Thread = None
 
 
+def _get_db() -> Generator:
+    if not config.database_url:
+        raise HTTPException(status_code=503, detail="database not configured")
+    conn = psycopg2.connect(config.database_url)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/lineage/upstream/{chunk_id}")
+def lineage_upstream(chunk_id: str, db=Depends(_get_db)):
+    return query_upstream(db, chunk_id)
+
+
+@app.get("/api/lineage/downstream/{source_path:path}")
+def lineage_downstream(source_path: str, tenant_id: str, db=Depends(_get_db)):
+    return query_downstream(db, tenant_id, source_path)
+
+
+@app.get("/api/lineage/stale/{tenant_id}")
+def lineage_stale(tenant_id: str, db=Depends(_get_db)):
+    return query_stale(db, tenant_id)
+
+
+@app.get("/api/lineage/provenance/{query_id}")
+def lineage_provenance(query_id: str, db=Depends(_get_db)):
+    return query_provenance(db, query_id)
+
+
+@app.get("/api/runs")
+def runs(tenant_id: Optional[str] = None, db=Depends(_get_db)):
+    return query_runs(db, tenant_id)
+
+
+@app.get("/api/quality/{tenant_id}")
+def quality(tenant_id: str, db=Depends(_get_db)):
+    return query_quality(db, tenant_id)
 
 
 @app.on_event("startup")
@@ -22,7 +72,6 @@ async def startup_event():
         logger.info("KAFKA_BOOTSTRAP or DATABASE_URL not set; skipping consumer startup")
         return
     try:
-        import psycopg2
         from confluent_kafka import Consumer, Producer
 
         db_conn = psycopg2.connect(config.database_url)

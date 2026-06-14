@@ -1,1 +1,8 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 4-A is complete. Here's what was implemented:
+
+**Files created/modified:**
+- `services/pipeline-operator/operator/k8s_client.py` — async K8s interface (apply/delete for Deployments, CronJobs, KafkaTopics, KafkaUsers, Roles, RoleBindings, ConfigMaps)
+- `services/pipeline-operator/operator/handlers.py` — kopf DataConnector reconcile: creates KafkaTopic + KafkaUser + per-connector Role/RoleBinding + Deployment (no `pollInterval`) or CronJob (`pollInterval` set); delete handler cleans up all owned resources
+- `services/pipeline-operator/operator/rbac.py` — fixed `connector_secret_name` to return `connector-{name}-creds` (was missing the `connector-` prefix, which caused the RBAC wildcard workaround bug)
+- `services/pipeline-operator/requirements.txt` — kopf, kubernetes-asyncio, pytest deps
+- `tests/unit/operator/test_dataconnector.py` — all 3 §2.7 tests pass: Deployment vs CronJob branching, exact secret names with no wildcards

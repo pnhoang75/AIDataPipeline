@@ -1,1 +1,6 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 5-C is complete. All 60 unit tests pass (28 for doc-processor, 32 for embedding-worker). The key work done:
+
+- **`services/doc-processor/src/metadata_event.py`** — `build_cloudevent()` + `MetadataEventPublisher.publish_document_chunk()` with `not_empty`/`min_token_count` quality checks and a `chunked_into` lineage edge to `RawDocument`
+- **`services/embedding-worker/src/metadata_event.py`** — `_l2_norm()` + `MetadataEventPublisher.publish_embedding()` with `embedding_norm` quality check and `embedded_by`/`stored_in` lineage edges
+- Both processors wire the publisher in — after successful chunk/Milvus publish; failures are swallowed and don't block offset commits
+- Fixed Prometheus Counter idempotency in `processor.py` via `_get_or_create_counter()` to handle module re-import during test collection

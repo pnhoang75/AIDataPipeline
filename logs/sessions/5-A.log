@@ -1,1 +1,14 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 5-A is complete. Here's a summary of what was done:
+
+**Created:**
+- `db/alembic_metadata.ini` — separate Alembic config for the metadata schema (uses `alembic_version_metadata` table to avoid collision with the existing quota schema migrations)
+- `db/alembic_metadata/env.py` — migration environment reading from `METADATA_DB_URL`
+- `db/alembic_metadata/script.py.mako` — revision template
+- `db/alembic_metadata/versions/5001_metadata_schema.py` — migration creating all 7 tables (`schema_versions`, `pipeline_runs`, `entities`, `lineage`, `processing_steps`, `data_quality`, `query_results`) with all indexes from `docs/metadata-lineage.md §3`
+- `tests/unit/db/test_metadata_schema.py` — 27 tests covering revision chain, all 7 tables present, column verification, default values, unique constraints, and downgrade
+
+**Key design decisions:**
+- Separate Alembic environment keeps metadata migrations independent from quota migrations (no risk of breaking `test_migrations.py`)
+- PostgreSQL path: uses `metadata` schema with proper types (JSONB, computed `duration_ms`, GIN index)
+- SQLite path (used by tests): flat table names, JSON type, regular nullable `duration_ms` column
+- All 27 tests pass in 0.23s

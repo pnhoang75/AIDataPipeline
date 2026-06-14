@@ -1,1 +1,7 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 5-D is complete. All 35 unit tests passed covering:
+
+- **RAG API** (`services/rag-api/src/metadata_event.py`): `MetadataEventPublisher.publish_rag_query` builds a `RAGQuery` CloudEvent and publishes to the `metadata-events` topic; integrated into `RagService` for both cached and live query paths.
+- **Metadata Service scaffold** (`services/metadata-service/src/`): FastAPI app with a background Kafka consumer (`MetadataConsumer`) that upserts entities, inserts lineage edges, records quality checks, updates `quality_status=failed` on failures, and publishes `DataQualityFailed` events.
+- **Unit tests** (`tests/unit/metadata/test_consumer.py`): 35 tests across entity upsert, lineage insertion, quality check handling, `DataQualityFailed` publishing, ignored event types, and the RAG API publisher — all green.
+
+Sentinel `.sessions-done/5-D` created and committed. Next session is 5-E.

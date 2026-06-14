@@ -1,1 +1,17 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 3-E is complete. Here's what was done:
+
+**Committed (28 files):**
+- `frontend/` — Full React SPA scaffold with:
+  - Vite + React 18 + TypeScript configured (`vite.config.ts`, `tsconfig.json`, `package.json`)
+  - OIDC PKCE flow via `@react-keycloak/web` (`src/keycloak.ts`, `src/main.tsx` with `pkceMethod: "S256"`)
+  - `RequireRole` guard component that triggers `keycloak.login()` for unauthenticated users and redirects to `/unauthorized` for wrong-role users
+  - Axios interceptor injecting `Authorization: Bearer <token>` on every request (`src/lib/axios.ts`)
+  - React Router with role-guarded `/admin/*` and `/workspace/*` routes (`src/router/index.tsx`)
+  - Zustand auth store (`src/store/auth.ts`)
+  - Tailwind CSS + shadcn/ui tokens (`src/globals.css`, `src/components/ui/button.tsx`)
+  - Vitest unit tests for `RequireRole` (`src/components/__tests__/RequireRole.test.tsx`)
+  - `Dockerfile` — multi-stage build (Node 20 → nginx:alpine)
+  - `nginx.conf` — SPA fallback routing + silent SSO path
+- `k8s/pipeline/pipeline-ui.yaml` — Deployment, Service, Ingress, NetworkPolicy for nginx on kind
+
+**Sentinel:** `.sessions-done/3-E` created. Next session is 3-F (Admin screens).

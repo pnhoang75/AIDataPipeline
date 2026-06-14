@@ -1,1 +1,13 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 4-G is complete. Here's what was done:
+
+- Created `tests/e2e/__init__.py` and `tests/e2e/test_self_service_wizard.py` with 8 E2E tests covering all scenarios from test plan §4.3 and §4.2:
+  1. **S3 connector creation flow** — test connection → create → verify DataConnector CR submitted to K8s with correct tenant/type
+  2. **File upload ingestion** — upload → MinIO stored → `metadata-events` Kafka event published with `entity_type: DataSource`
+  3. **Connector deletion cleanup** — create → delete → verify both ConfigMap and DataConnector CR are removed
+  4. **Free-tier quota enforcement** — first 2 connectors succeed; 3rd returns 402 QUOTA_EXCEEDED
+  5. **Pro-tier unlimited quota** — 5+ connectors succeed; `check_quota` is never called
+  6. **start_paused toggle** — `start_paused: true` propagates to `spec.startPaused: true` in the CR
+  7. **SSRF blocked at wizard Step 3** — RFC-1918 endpoint returns 400 SSRF_BLOCKED
+  8. **Upload skips quota + publishes event** — `check_quota` not called; Kafka event always published
+
+All 8 tests pass (`8 passed in 0.35s`).

@@ -1,1 +1,11 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 3-G is complete. Here's what was delivered:
+
+**Frontend — 3 User screens:**
+- `Workspaces.tsx` — card grid showing workspace name/description, create-workspace modal, delete button, "Browse files →" link
+- `DataSources.tsx` — tree browser grouping sources by type (S3 Buckets, NFS Folders, DB Tables, Kafka Topics, File Uploads), each group collapsible
+- `FileBrowser.tsx` — paginated table (50/page) with workspace selector, columns: Name, Path, Size, Chunks, Status; status badge color-coded (green=indexed, yellow=processing, red=failed, gray=pending)
+- `router/index.tsx` — added `/workspace/sources` and `/workspace/files` routes
+
+**BFF — Auth rejection tests (`tests/unit/bff/test_auth_rejection.py`):**
+- 14 tests covering all 6 rows of §7.1: no JWT→401, expired JWT→401, wrong role→403, forged X-Tenant-ID→403, pipeline-user on admin/tenants→403, cross-tenant workspace access→404
+- All 14 tests pass; full BFF suite (89 tests) has no regressions

@@ -1,1 +1,15 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 4-C is complete. Here's a summary of what was accomplished:
+
+**Deployed Pipeline Operator to kind cluster:**
+- CRDs were already applied from `docs/api/pipeline-operator-crds.yaml` (all 4: DataConnector, TenantWorkspace, EmbeddingConfig, PipelineCluster)
+- Deployment, ClusterRole, ClusterRoleBinding, and ServiceAccount were applied
+
+**Bugs found and fixed during deployment:**
+1. **NetworkPolicy gap** — The `default-deny-all` policy blocked the operator's egress to the K8s API server (port 443), so kopf's watch streams silently stalled after authentication. Fixed by adding `pipeline-operator-egress` NetworkPolicy.
+2. **Missing RBAC** — kopf needs `list/watch` on `customresourcedefinitions` at startup to validate handler registrations. Added to ClusterRole.
+3. **Strimzi API version** — `k8s_real_client.py` used `kafka.strimzi.io/v1beta2` but this Strimzi install only serves `v1`. Fixed to use `v1`.
+
+**Smoke test passed:**
+- Created `smoke-test-s3` DataConnector CR → `connector-smoke-test-s3` Deployment + `raw-documents` KafkaTopic + `connector-smoke-tenant-s3` KafkaUser appeared ✓
+- Deleted CR → Deployment and KafkaUser cleaned up, delete handler logged success ✓
+- Done-check: `kubectl get crd dataconnectors.ai-pipeline.io` — CRD present ✓

@@ -1,1 +1,11 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 4-F is complete. Here's a summary of what was built:
+
+**6 new files** in `frontend/src/pages/user/wizard/`:
+- `types.ts` — `SourceType`, `TestResult`, per-type credential field definitions
+- `Step1TypeSelector.tsx` — card grid for s3/nfs/postgres/kafka/upload
+- `Step2CredentialsForm.tsx` — dynamic credential form per type; drag-and-drop upload zone for upload type
+- `Step3TestPreview.tsx` — calls `POST /sources/test` with 15s timeout; shows latency + file preview; Next blocked until status=ok; upload type skips this step
+- `Step4NameSettings.tsx` — name, sync_frequency, file_type_filter, max_file_size_mb, workspace picker, start_paused toggle
+- `AddSourceWizard.tsx` — modal orchestrator; wires to `POST /sources/create` (or `/sources/upload` for file uploads); invalidates sources query on success
+
+**`DataSources.tsx`** updated with "Add source" button that opens the wizard modal.
