@@ -3,6 +3,7 @@ import logging
 import time
 from typing import Callable, List, Optional
 
+from opentelemetry import trace
 from prometheus_client import Counter
 from prometheus_client import REGISTRY as _prom_registry
 
@@ -14,6 +15,7 @@ from parsers import ParseError, parse
 from status import update_source_file_status
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 
 def _get_or_create_counter(name, doc, labelnames=()):
@@ -92,6 +94,14 @@ class DocumentProcessor:
         self._running = False
 
     def _process_message(self, msg) -> None:
+        with _tracer.start_as_current_span("kafka.consume") as span:
+            span.set_attribute("messaging.system", "kafka")
+            span.set_attribute("messaging.source", msg.topic() or self._cfg.kafka_input_topic)
+            span.set_attribute("messaging.operation", "receive")
+            if msg.partition() is not None:
+                span.set_attribute("messaging.kafka.partition", msg.partition())
+            if msg.offset() is not None:
+                span.set_attribute("messaging.kafka.offset", msg.offset())
         try:
             event = RawDocumentEvent.from_json(msg.value().decode("utf-8"))
         except Exception as exc:
@@ -186,7 +196,12 @@ class DocumentProcessor:
     def _produce_with_retry(self, producer, topic: str, key: str, value: str) -> bool:
         for attempt in range(_CHUNK_PUBLISH_MAX_RETRIES):
             try:
-                producer.produce(topic, key=key.encode(), value=value.encode())
+                with _tracer.start_as_current_span("kafka.produce") as span:
+                    span.set_attribute("messaging.system", "kafka")
+                    span.set_attribute("messaging.destination", topic)
+                    span.set_attribute("messaging.operation", "publish")
+                    span.set_attribute("messaging.kafka.message_key", key)
+                    producer.produce(topic, key=key.encode(), value=value.encode())
                 return True
             except Exception as exc:
                 logger.warning("Produce attempt %d/%d failed: %s", attempt + 1, _CHUNK_PUBLISH_MAX_RETRIES, exc)

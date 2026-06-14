@@ -4,6 +4,10 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 sys.path.insert(
     0,
@@ -250,3 +254,36 @@ class TestNFSMultipleFiles:
         assert len(events) == 3
         assert producer.produce.call_count == 3
         assert redis.sadd.call_count == 3
+
+
+class TestNFSOTelSpans:
+    @pytest.fixture
+    def span_exporter(self):
+        """Provide InMemorySpanExporter; patch connector module's _tracer directly."""
+        import connector as conn_mod
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        test_tracer = provider.get_tracer("test")
+        original_tracer = conn_mod._tracer
+        conn_mod._tracer = test_tracer
+        yield exporter
+        conn_mod._tracer = original_tracer
+        exporter.clear()
+
+    def test_publish_with_retry_emits_kafka_produce_span(self, span_exporter, tmp_path):
+        """_publish_with_retry emits a kafka.produce span on every successful publish."""
+        test_file = tmp_path / "doc.pdf"
+        test_file.write_bytes(b"%PDF test")
+        connector, producer, redis, db = _make_nfs_connector(
+            mount_path=str(tmp_path), observer_alive=True
+        )
+        connector._file_queue.put(str(test_file))
+        list(connector.poll())
+
+        span_names = [s.name for s in span_exporter.get_finished_spans()]
+        assert "kafka.produce" in span_names
+        span = next(s for s in span_exporter.get_finished_spans() if s.name == "kafka.produce")
+        assert span.attributes.get("messaging.system") == "kafka"
+        assert span.attributes.get("messaging.destination") == "raw-documents"
+        assert span.attributes.get("messaging.operation") == "publish"

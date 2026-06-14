@@ -6,6 +6,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Iterator, Optional, Set
 
+from opentelemetry import trace
 from prometheus_client import Counter, REGISTRY
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -16,6 +17,7 @@ from metadata_event import MetadataEventPublisher
 from status import write_source_file_status
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 try:
     connector_errors_total = Counter(
@@ -209,12 +211,17 @@ class NFSConnector(SourceConnector):
         delay_ms = _KAFKA_RETRY_BASE_MS
         for attempt in range(_KAFKA_MAX_RETRIES):
             try:
-                self._producer.produce(
-                    self._cfg.kafka_topic,
-                    key=event.event_id.encode(),
-                    value=event.to_json().encode(),
-                )
-                self._producer.flush(timeout=self._cfg.kafka_produce_timeout_ms / 1000)
+                with _tracer.start_as_current_span("kafka.produce") as span:
+                    span.set_attribute("messaging.system", "kafka")
+                    span.set_attribute("messaging.destination", self._cfg.kafka_topic)
+                    span.set_attribute("messaging.operation", "publish")
+                    span.set_attribute("messaging.kafka.message_key", event.event_id)
+                    self._producer.produce(
+                        self._cfg.kafka_topic,
+                        key=event.event_id.encode(),
+                        value=event.to_json().encode(),
+                    )
+                    self._producer.flush(timeout=self._cfg.kafka_produce_timeout_ms / 1000)
                 return True
             except Exception as exc:
                 logger.warning("Kafka produce attempt %d failed: %s", attempt + 1, exc)

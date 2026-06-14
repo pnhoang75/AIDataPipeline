@@ -5,6 +5,10 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 sys.path.insert(
     0,
@@ -616,3 +620,69 @@ class TestDLQEnvelopeSchema:
         assert parsed["original_offset"] == 100
         assert parsed["failure_count"] == 1
         assert isinstance(parsed["dlq_id"], str)
+
+
+class TestDocProcessorOTelSpans:
+    @pytest.fixture
+    def span_exporter(self):
+        """Provide an InMemorySpanExporter and patch the processor module's _tracer."""
+        import processor as proc_mod
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        test_tracer = provider.get_tracer("test")
+        original_tracer = proc_mod._tracer
+        proc_mod._tracer = test_tracer
+        yield exporter
+        proc_mod._tracer = original_tracer
+        exporter.clear()
+
+    def test_process_message_emits_kafka_consume_span(self, span_exporter):
+        """_process_message emits a kafka.consume span with topic/partition/offset attributes."""
+        from processor import DocumentProcessor
+
+        cfg = _make_processor_cfg()
+        event = _make_raw_event(content_type="text/plain")
+        msg = _make_kafka_msg(event, topic="raw-documents", partition=2, offset=99)
+
+        proc = DocumentProcessor(
+            consumer=MagicMock(),
+            producer=MagicMock(),
+            dlq_producer=MagicMock(),
+            content_fetcher=lambda ref: b"Plain text content for span test",
+            db_conn=MagicMock(),
+            cfg=cfg,
+        )
+        proc._process_message(msg)
+
+        span_names = [s.name for s in span_exporter.get_finished_spans()]
+        assert "kafka.consume" in span_names
+        span = next(s for s in span_exporter.get_finished_spans() if s.name == "kafka.consume")
+        assert span.attributes.get("messaging.system") == "kafka"
+        assert span.attributes.get("messaging.source") == "raw-documents"
+        assert span.attributes.get("messaging.operation") == "receive"
+        assert span.attributes.get("messaging.kafka.partition") == 2
+        assert span.attributes.get("messaging.kafka.offset") == 99
+
+    def test_produce_with_retry_emits_kafka_produce_span(self, span_exporter):
+        """_produce_with_retry emits a kafka.produce span with destination and key attributes."""
+        from processor import DocumentProcessor
+
+        cfg = _make_processor_cfg()
+        producer = MagicMock()
+        proc = DocumentProcessor(
+            consumer=MagicMock(),
+            producer=producer,
+            dlq_producer=MagicMock(),
+            content_fetcher=lambda ref: b"",
+            cfg=cfg,
+        )
+        proc._produce_with_retry(producer, "document-chunks", "chunk-abc", '{"text": "hi"}')
+
+        span_names = [s.name for s in span_exporter.get_finished_spans()]
+        assert "kafka.produce" in span_names
+        span = next(s for s in span_exporter.get_finished_spans() if s.name == "kafka.produce")
+        assert span.attributes.get("messaging.system") == "kafka"
+        assert span.attributes.get("messaging.destination") == "document-chunks"
+        assert span.attributes.get("messaging.operation") == "publish"
+        assert span.attributes.get("messaging.kafka.message_key") == "chunk-abc"
