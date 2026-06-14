@@ -27,6 +27,8 @@ deploymentMode: SingleBinary
 
 singleBinary:
   replicas: 1
+  podLabels:
+    app: loki
   resources:
     requests:
       cpu: 100m
