@@ -1,12 +1,14 @@
 import logging
 import threading
-from typing import Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 import psycopg2
 from fastapi import Depends, FastAPI, HTTPException
+from pydantic import BaseModel
 
 from config import config
 from db import (
+    create_schema_version,
     query_downstream,
     query_provenance,
     query_quality,
@@ -64,6 +66,37 @@ def runs(tenant_id: Optional[str] = None, db=Depends(_get_db)):
 @app.get("/api/quality/{tenant_id}")
 def quality(tenant_id: str, db=Depends(_get_db)):
     return query_quality(db, tenant_id)
+
+
+class SchemaVersionRequest(BaseModel):
+    tenant_id: str
+    embedding_model: str
+    embedding_dimension: int
+    embedding_backend: str
+    chunk_size: int = 512
+    chunk_overlap: int = 64
+    chunking_strategy: str = "fixed"
+    index_type: str = "IVF_FLAT"
+    created_by: Optional[str] = None
+
+
+@app.post("/api/schema-versions", status_code=201)
+def create_schema_version_endpoint(
+    body: SchemaVersionRequest, db=Depends(_get_db)
+) -> Dict[str, Any]:
+    """Create a new SchemaVersion for a tenant, deactivating previous versions."""
+    return create_schema_version(
+        db,
+        tenant_id=body.tenant_id,
+        embedding_model=body.embedding_model,
+        embedding_dimension=body.embedding_dimension,
+        embedding_backend=body.embedding_backend,
+        chunk_size=body.chunk_size,
+        chunk_overlap=body.chunk_overlap,
+        chunking_strategy=body.chunking_strategy,
+        index_type=body.index_type,
+        created_by=body.created_by,
+    )
 
 
 @app.on_event("startup")

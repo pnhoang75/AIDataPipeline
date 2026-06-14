@@ -275,6 +275,52 @@ def query_runs(conn, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
         return [_row_to_dict(r) for r in cur.fetchall()]
 
 
+def create_schema_version(
+    conn,
+    tenant_id: str,
+    embedding_model: str,
+    embedding_dimension: int,
+    embedding_backend: str,
+    chunk_size: int = 512,
+    chunk_overlap: int = 64,
+    chunking_strategy: str = "fixed",
+    index_type: str = "IVF_FLAT",
+    created_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Deactivate previous schema versions for the tenant and insert a new current one."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            "UPDATE metadata.schema_versions SET is_current = FALSE WHERE tenant_id = %s::uuid",
+            (tenant_id,),
+        )
+        cur.execute(
+            """
+            INSERT INTO metadata.schema_versions
+                (tenant_id, version_number, chunk_size, chunk_overlap,
+                 chunking_strategy, embedding_model, embedding_dimension,
+                 embedding_backend, index_type, is_current, created_by)
+            VALUES (
+                %s::uuid,
+                COALESCE(
+                    (SELECT MAX(version_number) FROM metadata.schema_versions WHERE tenant_id = %s::uuid),
+                    0
+                ) + 1,
+                %s, %s, %s, %s, %s, %s, %s, TRUE, %s
+            )
+            RETURNING id, version_number, embedding_model, embedding_dimension, is_current
+            """,
+            (
+                tenant_id, tenant_id,
+                chunk_size, chunk_overlap, chunking_strategy,
+                embedding_model, embedding_dimension, embedding_backend,
+                index_type, created_by,
+            ),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return _row_to_dict(row)
+
+
 def query_quality(conn, tenant_id: str) -> List[Dict[str, Any]]:
     """Return failed/warned quality checks for a tenant."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
