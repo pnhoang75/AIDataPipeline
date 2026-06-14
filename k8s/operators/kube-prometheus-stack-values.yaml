@@ -94,6 +94,13 @@ grafana:
       drop: ["ALL"]
   persistence:
     enabled: false
+  # Sidecar watches ConfigMaps labelled grafana_datasource=1 and auto-loads them
+  sidecar:
+    datasources:
+      enabled: true
+      label: grafana_datasource
+      labelValue: "1"
+      searchNamespace: ALL
 
 kubeStateMetrics:
   enabled: true

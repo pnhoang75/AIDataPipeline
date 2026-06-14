@@ -32,6 +32,10 @@ env:
   log_level: info
   trusted_ips: "0.0.0.0/0"
   real_ip_header: "X-Forwarded-For"
+  # JSON access log format — includes fields required for Loki log queries
+  # Fields: sub (from JWT), X-Tenant-ID (injected by Kong), quota_checked, cached
+  nginx_http_log_format: |
+    escape=json '{"time":"$time_iso8601","method":"$request_method","uri":"$request_uri","status":$status,"latency_ms":$request_time,"bytes":$body_bytes_sent,"tenant_id":"$http_x_tenant_id","sub":"$http_x_consumer_username","quota_checked":"$sent_http_x_quota_checked","cached":"$sent_http_x_cache_status","upstream":"$upstream_addr","request_id":"$request_id"}'
 
 dblessConfig:
   configMap: ""
