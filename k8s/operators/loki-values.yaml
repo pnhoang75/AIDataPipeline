@@ -83,6 +83,12 @@ bloomGateway:
 minio:
   enabled: false
 
+# Disable in-cluster caches (insufficient cluster memory in testbed)
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+
 # Grafana Agent / Helm test / etc disabled
 test:
   enabled: false
