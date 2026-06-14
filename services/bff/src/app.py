@@ -1,9 +1,10 @@
-import logging
 import uuid
 
+import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from logging_config import bind_request_context, clear_request_context
 from admin_endpoints import router as admin_router
 from auth import JWTClaims, require_admin, require_auth
 from lineage_endpoints import router as lineage_router
@@ -11,7 +12,7 @@ from tenant_endpoints import router as tenant_router
 from user_endpoints import router as user_router
 from user_sources import router as user_sources_router
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 app = FastAPI(title="Pipeline Management API (BFF)", version="1.0.0")
 app.include_router(admin_router)
@@ -22,8 +23,17 @@ app.include_router(lineage_router)
 
 
 @app.middleware("http")
-async def request_id_middleware(request: Request, call_next):
+async def request_context_middleware(request: Request, call_next):
     request.state.request_id = str(uuid.uuid4())
+    tenant_id = request.headers.get("X-Tenant-ID", "")
+    traceparent = request.headers.get("traceparent", "")
+    trace_id, span_id = "", ""
+    if traceparent:
+        parts = traceparent.split("-")
+        if len(parts) == 4:
+            trace_id, span_id = parts[1], parts[2]
+    clear_request_context()
+    bind_request_context(tenant_id=tenant_id, trace_id=trace_id, span_id=span_id)
     return await call_next(request)
 
 

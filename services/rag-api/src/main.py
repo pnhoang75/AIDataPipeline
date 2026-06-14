@@ -1,18 +1,16 @@
-import logging
 import uvicorn
 import redis as redis_lib
+import structlog
 
+from logging_config import setup_logging, bind_request_context
 from app import app, RagService
 from backends import LocalCPUBackend
 from circuit_breaker import CircuitBreaker
 from config import config
 from milvus_searcher import MilvusSearcher
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='{"time":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
-)
-logger = logging.getLogger(__name__)
+setup_logging("rag-api")
+logger = structlog.get_logger(__name__)
 
 
 @app.on_event("startup")

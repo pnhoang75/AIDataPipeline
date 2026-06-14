@@ -1,17 +1,18 @@
 import hashlib
 import json
-import logging
 import time as _time
 import uuid
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+import structlog
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 
+from logging_config import bind_request_context, clear_request_context
 from circuit_breaker import CircuitBreaker, CircuitBreakerOpen
 from config import Config, config as _default_config
 from models import QueryRequest, QueryResponse, QueryResult
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 try:
     from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
@@ -203,6 +204,20 @@ class RagService:
 
 app = FastAPI(title="RAG API", version="1.0.0")
 _service: Optional[RagService] = None
+
+
+@app.middleware("http")
+async def request_context_middleware(request: Request, call_next):
+    tenant_id = request.headers.get("X-Tenant-ID", "")
+    traceparent = request.headers.get("traceparent", "")
+    trace_id, span_id = "", ""
+    if traceparent:
+        parts = traceparent.split("-")
+        if len(parts) == 4:
+            trace_id, span_id = parts[1], parts[2]
+    clear_request_context()
+    bind_request_context(tenant_id=tenant_id, trace_id=trace_id, span_id=span_id)
+    return await call_next(request)
 
 
 def get_service() -> RagService:

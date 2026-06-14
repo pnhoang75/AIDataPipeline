@@ -18,16 +18,21 @@ import threading
 from concurrent import futures
 from http.server import BaseHTTPRequestHandler, HTTPServer as _HTTPServer
 
+from logging_config import setup_logging, bind_request_context
+
+setup_logging("quota-service")
+
 import grpc
 import redis as redis_lib
 import sqlalchemy as sa
+import structlog
 from sqlalchemy.orm import sessionmaker
 
 from config import Config
 from db_queries import make_get_limit_fn
 from quota_service import QuotaService, QuotaStatus
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 try:
     from prometheus_client import Counter, start_http_server
@@ -240,5 +245,4 @@ def serve(cfg=None) -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     serve()

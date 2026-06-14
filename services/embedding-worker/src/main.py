@@ -1,19 +1,16 @@
-import logging
-
 import psycopg2
+import structlog
 from confluent_kafka import Consumer, Producer
 from prometheus_client import start_http_server
 
+from logging_config import setup_logging
 from backends import LocalCPUBackend, OpenAIBackend
 from config import config
 from milvus_writer import MilvusWriter
 from worker import EmbeddingWorker
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='{"time":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
-)
-logger = logging.getLogger(__name__)
+setup_logging("embedding-worker")
+logger = structlog.get_logger(__name__)
 
 
 def main() -> None:

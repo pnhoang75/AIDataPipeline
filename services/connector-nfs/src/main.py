@@ -3,17 +3,16 @@ import time
 
 import psycopg2
 import redis as redis_lib
+import structlog
 from confluent_kafka import Producer
 from prometheus_client import start_http_server
 
 from config import config
 from connector import NFSConnector
+from logging_config import setup_logging, bind_request_context
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='{"time":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
-)
-logger = logging.getLogger(__name__)
+setup_logging("connector-nfs")
+logger = structlog.get_logger(__name__)
 
 
 def build_kafka_producer() -> Producer:
@@ -33,11 +32,12 @@ def build_db_conn():
 
 
 def main() -> None:
+    bind_request_context(tenant_id=config.tenant_id)
     start_http_server(9090)
     logger.info(
-        "Starting NFS connector (connector_id=%s, mount=%s)",
-        config.connector_id,
-        config.nfs_mount_path,
+        "Starting NFS connector",
+        connector_id=config.connector_id,
+        mount=config.nfs_mount_path,
     )
 
     kafka_producer = build_kafka_producer()
@@ -56,10 +56,10 @@ def main() -> None:
             count = 0
             for event in connector.poll():
                 count += 1
-            logger.info("Poll complete: %d events published", count)
+            logger.info("Poll complete", events_published=count)
             backoff_multiplier = 1.0
         except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
-            logger.warning("DB connection lost (%s); reconnecting", exc)
+            logger.warning("DB connection lost, reconnecting", error=str(exc))
             try:
                 db_conn.close()
             except Exception:
@@ -69,10 +69,10 @@ def main() -> None:
                 connector._db = db_conn
                 logger.info("DB reconnected")
             except Exception as reconn_exc:
-                logger.error("DB reconnect failed: %s", reconn_exc)
+                logger.error("DB reconnect failed", error=str(reconn_exc))
                 backoff_multiplier = min(backoff_multiplier * 2, 10.0)
         except Exception as exc:
-            logger.error("Poll failed: %s", exc, exc_info=True)
+            logger.error("Poll failed", error=str(exc), exc_info=True)
             backoff_multiplier = min(backoff_multiplier * 2, 10.0)
 
         time.sleep(poll_interval * backoff_multiplier)

@@ -1,18 +1,15 @@
-import logging
-
+import structlog
 from confluent_kafka import Consumer, Producer
 from minio import Minio
 from prometheus_client import start_http_server
 
+from logging_config import setup_logging
 from config import config
 from fetcher import fetch_content_with_retry
 from processor import DocumentProcessor
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
-logger = logging.getLogger(__name__)
+setup_logging("doc-processor")
+logger = structlog.get_logger(__name__)
 
 
 def main() -> None:
