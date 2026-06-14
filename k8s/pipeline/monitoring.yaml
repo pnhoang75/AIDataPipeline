@@ -1,4 +1,21 @@
 ---
+# ServiceMonitor: quota-service (prometheus_client exposes /metrics on port 9090)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: quota-service
+  namespace: ai-pipeline
+  labels:
+    app: quota-service
+spec:
+  selector:
+    matchLabels:
+      app: quota-service
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
 # ServiceMonitor: connector-s3
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -126,3 +143,14 @@ spec:
           annotations:
             summary: "RAG API p99 latency is above 2 seconds"
             description: "The 99th percentile query latency for the RAG API has exceeded 2 seconds for more than 5 minutes."
+
+    - name: pipeline.quota
+      rules:
+        - alert: TenantNearQuota
+          expr: quota_usage_ratio > 0.8
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Tenant {{ $labels.tenant_id }} is near quota limit for {{ $labels.metric }} ({{ $value | humanizePercentage }})"
+            description: "Tenant {{ $labels.tenant_id }} has used more than 80% of their {{ $labels.metric }} quota. Current ratio: {{ $value | humanizePercentage }}."

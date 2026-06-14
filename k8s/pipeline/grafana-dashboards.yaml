@@ -1,0 +1,468 @@
+---
+# GrafanaDashboard: Pipeline Overview
+# Shows document throughput, Kafka consumer lag, and service error rates.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: pipeline-overview
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  json: |
+    {
+      "title": "Pipeline Overview",
+      "uid": "pipeline-overview",
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Document Ingestion Throughput (docs/min)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum(rate(doc_processor_documents_processed_total[5m])) * 60",
+              "legendFormat": "docs/min"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Kafka Consumer Lag",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "kafka_consumergroup_lag{consumergroup=~\"doc-processor|embedding-worker\"}",
+              "legendFormat": "{{ consumergroup }}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Service Error Rate (5xx/s)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum by (job) (rate(http_requests_total{status=~\"5..\"}[5m]))",
+              "legendFormat": "{{ job }}"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Embedding Throughput (chunks/min)",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum(rate(embedding_worker_chunks_embedded_total[5m])) * 60",
+              "legendFormat": "chunks/min"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Active Connectors",
+          "type": "stat",
+          "gridPos": { "x": 0, "y": 16, "w": 6, "h": 4 },
+          "targets": [
+            {
+              "expr": "count(up{job=~\"connector-.*\"} == 1)",
+              "legendFormat": "connectors up"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Kafka Lag > 1000 (alert threshold)",
+          "type": "stat",
+          "gridPos": { "x": 6, "y": 16, "w": 6, "h": 4 },
+          "targets": [
+            {
+              "expr": "count(kafka_consumergroup_lag{consumergroup=~\"doc-processor|embedding-worker\"} > 1000) or vector(0)",
+              "legendFormat": "lagging groups"
+            }
+          ]
+        }
+      ]
+    }
+---
+# GrafanaDashboard: RAG Performance
+# Tracks query latency percentiles (p50/p95/p99) and cache hit rate.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: rag-performance
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  json: |
+    {
+      "title": "RAG Performance",
+      "uid": "rag-performance",
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Query Latency p50 / p95 / p99 (seconds)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 0, "w": 16, "h": 10 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(rag_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p50"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(rag_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p95"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(rag_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p99"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Cache Hit Rate",
+          "type": "timeseries",
+          "gridPos": { "x": 16, "y": 0, "w": 8, "h": 10 },
+          "targets": [
+            {
+              "expr": "sum(rate(rag_cache_hits_total[5m])) / (sum(rate(rag_cache_hits_total[5m])) + sum(rate(rag_cache_misses_total[5m])))",
+              "legendFormat": "hit rate"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1
+            }
+          }
+        },
+        {
+          "id": 3,
+          "title": "RAG Request Rate (req/s)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum(rate(rag_request_duration_seconds_count[5m]))",
+              "legendFormat": "req/s"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "p99 Latency (current)",
+          "type": "stat",
+          "gridPos": { "x": 12, "y": 10, "w": 6, "h": 4 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(rag_request_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "p99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 0.5 },
+                  { "color": "red", "value": 1.0 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 5,
+          "title": "Milvus Search Latency p99 (s)",
+          "type": "stat",
+          "gridPos": { "x": 18, "y": 10, "w": 6, "h": 4 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(milvus_search_duration_seconds_bucket[5m])) by (le))",
+              "legendFormat": "milvus p99"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "s" }
+          }
+        }
+      ]
+    }
+---
+# GrafanaDashboard: Quota Usage
+# Per-tenant quota_usage_ratio gauges (0–1 scale, alert threshold at 0.8).
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: quota-usage
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  json: |
+    {
+      "title": "Quota Usage",
+      "uid": "quota-usage",
+      "refresh": "1m",
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Quota Usage Ratio by Tenant & Metric",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
+          "targets": [
+            {
+              "expr": "quota_usage_ratio",
+              "legendFormat": "{{ tenant_id }} / {{ metric }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 0.7 },
+                  { "color": "red", "value": 0.8 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 2,
+          "title": "Tenants Near Quota (usage > 80%)",
+          "type": "table",
+          "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "quota_usage_ratio > 0.8",
+              "legendFormat": "{{ tenant_id }} - {{ metric }}",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Quota Checks per Second",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum by (status) (rate(quota_checks_total[5m]))",
+              "legendFormat": "{{ status }}"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Quota Exceeded Rate (per tenant)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 18, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum by (tenant_id) (rate(quota_exceeded_total[5m]))",
+              "legendFormat": "{{ tenant_id }}"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "gRPC Check Latency p99 (ms)",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 18, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(quota_grpc_duration_seconds_bucket[5m])) by (le)) * 1000",
+              "legendFormat": "p99 (ms)"
+            }
+          ]
+        }
+      ]
+    }
+---
+# GrafanaDashboard: Data Quality
+# Heatmap of data quality check failures by check_name and tenant_id.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: data-quality
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  json: |
+    {
+      "title": "Data Quality",
+      "uid": "data-quality",
+      "refresh": "1m",
+      "time": { "from": "now-24h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Data Quality Failures Heatmap (by check_name)",
+          "type": "heatmap",
+          "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
+          "targets": [
+            {
+              "expr": "sum by (check_name, le) (increase(data_quality_failures_total[1h]))",
+              "legendFormat": "{{ check_name }}"
+            }
+          ],
+          "options": {
+            "calculate": false,
+            "yAxis": { "unit": "short" }
+          }
+        },
+        {
+          "id": 2,
+          "title": "Failure Rate by Check Name (failures/min)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum by (check_name) (rate(data_quality_failures_total[5m])) * 60",
+              "legendFormat": "{{ check_name }}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Failure Rate by Tenant (failures/min)",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum by (tenant_id) (rate(data_quality_failures_total[5m])) * 60",
+              "legendFormat": "{{ tenant_id }}"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Total Failures (last 24 h)",
+          "type": "stat",
+          "gridPos": { "x": 0, "y": 18, "w": 6, "h": 4 },
+          "targets": [
+            {
+              "expr": "sum(increase(data_quality_failures_total[24h]))",
+              "legendFormat": "total"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Top Failing Check (last 1 h)",
+          "type": "bargauge",
+          "gridPos": { "x": 6, "y": 18, "w": 18, "h": 6 },
+          "targets": [
+            {
+              "expr": "topk(5, sum by (check_name) (increase(data_quality_failures_total[1h])))",
+              "legendFormat": "{{ check_name }}",
+              "instant": true
+            }
+          ]
+        }
+      ]
+    }
+---
+# GrafanaDashboard: Lineage Coverage
+# Tracks metadata entity counts per tenant over time.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: lineage-coverage
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  json: |
+    {
+      "title": "Lineage Coverage",
+      "uid": "lineage-coverage",
+      "refresh": "5m",
+      "time": { "from": "now-7d", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Metadata Entities per Tenant Over Time",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
+          "targets": [
+            {
+              "expr": "sum by (tenant_id) (metadata_entities_total)",
+              "legendFormat": "{{ tenant_id }}"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Lineage Events Published (events/min)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum by (tenant_id) (rate(metadata_events_published_total[5m])) * 60",
+              "legendFormat": "{{ tenant_id }}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Entity Type Distribution (current)",
+          "type": "piechart",
+          "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "expr": "sum by (entity_type) (metadata_entities_total)",
+              "legendFormat": "{{ entity_type }}",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Total Entities",
+          "type": "stat",
+          "gridPos": { "x": 0, "y": 18, "w": 6, "h": 4 },
+          "targets": [
+            {
+              "expr": "sum(metadata_entities_total)",
+              "legendFormat": "total entities"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Lineage Graph Edges (DataSource → Dataset → Model)",
+          "type": "timeseries",
+          "gridPos": { "x": 6, "y": 18, "w": 18, "h": 6 },
+          "targets": [
+            {
+              "expr": "sum by (edge_type) (metadata_lineage_edges_total)",
+              "legendFormat": "{{ edge_type }}"
+            }
+          ]
+        }
+      ]
+    }
