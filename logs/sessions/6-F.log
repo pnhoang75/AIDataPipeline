@@ -1,1 +1,14 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 6-F is complete. Here's what was done:
+
+**HA Manifest Updates:**
+- `kafka.yaml`: Scaled KafkaNodePool from 1→3 replicas; set `replication.factor:3`, `min.insync.replicas:2`
+- `cnpg-quota-db.yaml`: Scaled CNPG from 1→2 instances (primary + replica with auto-failover)
+- `milvus.yaml`: Switched from `mode: standalone` to `mode: cluster` with 2 queryNodes, 2 dataNodes, 1 indexNode, 3-node etcd quorum
+- `redis-standalone.yaml`: Scaled Redis 1→3 replicas and Sentinel 1→3 for proper quorum
+
+**PodDisruptionBudgets:** Added `minAvailable: 1` PDBs to `doc-processor.yaml`, `embedding-worker.yaml`, and `rag-api.yaml`
+
+**Chaos Tests (26 tests, all passing):**
+- `test_chaos_kafka_embedder.py` — §8.1 (Kafka broker failure), §8.6 (network partition retry/backoff), §8.7 (OOM idempotent redelivery)
+- `test_chaos_rag.py` — §8.2 (PostgreSQL failover: RAG query path is DB-independent), §8.3 (Milvus circuit breaker open/close lifecycle), §8.5 RAG aspect (Redis unavailability: degrades gracefully)
+- `test_chaos_quota.py` — §8.4 (Quota service fail-open), §8.5 quota aspect (Redis loss → ALLOWED)

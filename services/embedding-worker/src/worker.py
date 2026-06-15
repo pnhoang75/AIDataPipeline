@@ -5,6 +5,8 @@ import uuid
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
+from opentelemetry import trace
+
 from backends import EmbeddingBackend, RateLimitError
 from config import Config
 from events import DocumentChunkEvent, DLQEnvelope, EmbeddingEvent
@@ -13,6 +15,7 @@ from milvus_writer import MilvusWriter
 from status_updater import update_source_file_status
 
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 
 class EmbeddingWorker:
@@ -173,7 +176,11 @@ class EmbeddingWorker:
         for t_id, t_rows in tenant_rows.items():
             collection = f"{t_id}_docs"
             try:
-                self._milvus_writer.upsert(t_rows, collection=collection)
+                with _tracer.start_as_current_span("milvus.upsert") as span:
+                    span.set_attribute("db.system", "milvus")
+                    span.set_attribute("milvus.collection", collection)
+                    span.set_attribute("milvus.row_count", len(t_rows))
+                    self._milvus_writer.upsert(t_rows, collection=collection)
             except Exception as e:
                 logger.error("Milvus upsert failed for tenant %s: %s", t_id, e)
                 for msg, chunk in zip(messages, chunks):
@@ -190,7 +197,12 @@ class EmbeddingWorker:
             self._publish_usage_event(t_id, count, gpu_seconds)
 
         for chunk in chunks:
-            self._publish_embedding_event(chunk, len(chunks))
+            with _tracer.start_as_current_span("kafka.produce") as span:
+                span.set_attribute("messaging.system", "kafka")
+                span.set_attribute("messaging.destination", self._cfg.kafka_event_topic)
+                span.set_attribute("messaging.operation", "publish")
+                span.set_attribute("messaging.kafka.partition", -1)
+                self._publish_embedding_event(chunk, len(chunks))
             try:
                 update_source_file_status(
                     self._db_conn, chunk.source_id, "indexed", len(chunks)
@@ -229,6 +241,12 @@ class EmbeddingWorker:
                 continue
             try:
                 chunk = DocumentChunkEvent.from_json(msg.value().decode())
+                with _tracer.start_as_current_span("kafka.consume") as span:
+                    span.set_attribute("messaging.system", "kafka")
+                    span.set_attribute("messaging.source", msg.topic())
+                    span.set_attribute("messaging.operation", "receive")
+                    span.set_attribute("messaging.kafka.partition", msg.partition())
+                    span.set_attribute("messaging.kafka.offset", msg.offset())
                 batch.append((msg, chunk))
             except Exception as e:
                 logger.error("Failed to deserialise chunk event: %s", e)

@@ -6,6 +6,7 @@ from typing import List, Optional
 
 import structlog
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from opentelemetry import trace
 
 from logging_config import bind_request_context, clear_request_context
 from circuit_breaker import CircuitBreaker, CircuitBreakerOpen
@@ -13,6 +14,7 @@ from config import Config, config as _default_config
 from models import QueryRequest, QueryResponse, QueryResult
 
 logger = structlog.get_logger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 try:
     from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
@@ -75,7 +77,12 @@ class RagService:
         # ── Redis cache check ────────────────────────────────────────────────
         cache_available = True
         try:
-            cached_raw = self._redis.get(cache_key)
+            with _tracer.start_as_current_span("redis.get") as span:
+                span.set_attribute("db.system", "redis")
+                span.set_attribute("db.operation", "GET")
+                span.set_attribute("db.redis.cache_key_prefix", "rag:")
+                cached_raw = self._redis.get(cache_key)
+                span.set_attribute("redis.cache_hit", cached_raw is not None)
             if cached_raw is not None:
                 if _METRICS_ENABLED:
                     _CACHE_HITS.inc()
@@ -157,11 +164,16 @@ class RagService:
         # ── Store in cache ───────────────────────────────────────────────────
         if cache_available:
             try:
-                self._redis.setex(
-                    cache_key,
-                    self._cfg.redis_ttl_seconds,
-                    json.dumps([r.model_dump() for r in results]),
-                )
+                with _tracer.start_as_current_span("redis.setex") as span:
+                    span.set_attribute("db.system", "redis")
+                    span.set_attribute("db.operation", "SETEX")
+                    span.set_attribute("db.redis.cache_key_prefix", "rag:")
+                    span.set_attribute("redis.ttl_seconds", self._cfg.redis_ttl_seconds)
+                    self._redis.setex(
+                        cache_key,
+                        self._cfg.redis_ttl_seconds,
+                        json.dumps([r.model_dump() for r in results]),
+                    )
             except ConnectionError:
                 pass
 

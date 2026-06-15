@@ -18,9 +18,12 @@ import threading
 from concurrent import futures
 from http.server import BaseHTTPRequestHandler, HTTPServer as _HTTPServer
 
+from opentelemetry import trace
+
 from logging_config import setup_logging, bind_request_context
 
 setup_logging("quota-service")
+_tracer = trace.get_tracer(__name__)
 
 import grpc
 import redis as redis_lib
@@ -35,16 +38,40 @@ from quota_service import QuotaService, QuotaStatus
 logger = structlog.get_logger(__name__)
 
 try:
-    from prometheus_client import Counter, start_http_server
+    from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
     _QUOTA_SKIPPED = Counter(
         "quota_check_skipped_total",
         "Quota checks skipped because Redis was unavailable",
     )
+    _QUOTA_CHECKS_TOTAL = Counter(
+        "quota_checks_total",
+        "Total quota check calls",
+        ["tenant_id", "metric", "status"],
+    )
+    _QUOTA_EXCEEDED_TOTAL = Counter(
+        "quota_exceeded_total",
+        "Total quota exceeded events",
+        ["tenant_id", "metric"],
+    )
+    _QUOTA_GRPC_DURATION = Histogram(
+        "quota_grpc_duration_seconds",
+        "gRPC quota check call duration",
+        buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
+    )
+    _QUOTA_USAGE_RATIO = Gauge(
+        "quota_usage_ratio",
+        "Current quota usage as a fraction of the limit (0–1)",
+        ["tenant_id", "metric"],
+    )
     _METRICS_ENABLED = True
 except ImportError:
     _METRICS_ENABLED = False
     _QUOTA_SKIPPED = None
+    _QUOTA_CHECKS_TOTAL = None
+    _QUOTA_EXCEEDED_TOTAL = None
+    _QUOTA_GRPC_DURATION = None
+    _QUOTA_USAGE_RATIO = None
 
 # Proto-generated stubs — present after protoc build step
 try:
@@ -126,50 +153,86 @@ if _PROTO_AVAILABLE:
             self._svc = svc
 
         def CheckQuota(self, request, context):
-            result = self._svc.check_quota(
-                tenant_id=request.tenant_id,
-                metric=pb2.Metric.Name(request.metric),
-                amount=request.amount if request.amount > 0 else 1,
-                increment_on_allow=request.increment_on_allow
-                if request.HasField("increment_on_allow")
-                else True,
-            )
-            status_map = {
-                QuotaStatus.ALLOWED: pb2.ALLOWED,
-                QuotaStatus.DENIED: pb2.DENIED,
-                QuotaStatus.UNLIMITED: pb2.UNLIMITED,
-            }
-            return pb2.CheckQuotaResponse(
-                status=status_map.get(result.status, pb2.QUOTA_STATUS_UNSPECIFIED),
-                current_usage=result.current_usage,
-                limit=result.limit,
-                deny_reason=result.deny_reason,
-            )
+            import time as _time
+            metric_name = pb2.Metric.Name(request.metric)
+            with _tracer.start_as_current_span("quota.CheckQuota") as span:
+                span.set_attribute("rpc.system", "grpc")
+                span.set_attribute("rpc.service", "QuotaService")
+                span.set_attribute("rpc.method", "CheckQuota")
+                span.set_attribute("quota.tenant_id", request.tenant_id)
+                span.set_attribute("quota.metric", metric_name)
+                span.set_attribute("quota.amount", request.amount if request.amount > 0 else 1)
+                _start = _time.perf_counter()
+                result = self._svc.check_quota(
+                    tenant_id=request.tenant_id,
+                    metric=metric_name,
+                    amount=request.amount if request.amount > 0 else 1,
+                    increment_on_allow=request.increment_on_allow
+                    if request.HasField("increment_on_allow")
+                    else True,
+                )
+                elapsed = _time.perf_counter() - _start
+                if _QUOTA_GRPC_DURATION is not None:
+                    _QUOTA_GRPC_DURATION.observe(elapsed)
+                from quota_service import QuotaStatus as _QS
+                span.set_attribute("quota.result", _QS(result.status).name)
+                span.set_attribute("quota.current_usage", result.current_usage)
+                span.set_attribute("quota.limit", result.limit)
+                status_map = {
+                    QuotaStatus.ALLOWED: pb2.ALLOWED,
+                    QuotaStatus.DENIED: pb2.DENIED,
+                    QuotaStatus.UNLIMITED: pb2.UNLIMITED,
+                }
+                return pb2.CheckQuotaResponse(
+                    status=status_map.get(result.status, pb2.QUOTA_STATUS_UNSPECIFIED),
+                    current_usage=result.current_usage,
+                    limit=result.limit,
+                    deny_reason=result.deny_reason,
+                )
 
         def RecordUsage(self, request, context):
-            result = self._svc.record_usage(
-                tenant_id=request.tenant_id,
-                metric=pb2.Metric.Name(request.metric),
-                amount=request.amount,
-                event_id=request.event_id,
-            )
-            return pb2.RecordUsageResponse(
-                new_total=result.new_total,
-                deduped=result.deduped,
-            )
+            metric_name = pb2.Metric.Name(request.metric)
+            with _tracer.start_as_current_span("quota.RecordUsage") as span:
+                span.set_attribute("rpc.system", "grpc")
+                span.set_attribute("rpc.service", "QuotaService")
+                span.set_attribute("rpc.method", "RecordUsage")
+                span.set_attribute("quota.tenant_id", request.tenant_id)
+                span.set_attribute("quota.metric", metric_name)
+                span.set_attribute("quota.amount", request.amount)
+                result = self._svc.record_usage(
+                    tenant_id=request.tenant_id,
+                    metric=metric_name,
+                    amount=request.amount,
+                    event_id=request.event_id,
+                )
+                span.set_attribute("quota.deduped", result.deduped)
+                span.set_attribute("quota.new_total", result.new_total)
+                return pb2.RecordUsageResponse(
+                    new_total=result.new_total,
+                    deduped=result.deduped,
+                )
 
         def GetUsage(self, request, context):
-            data = self._svc.get_usage(
-                tenant_id=request.tenant_id,
-                metric=pb2.Metric.Name(request.metric),
-            )
-            return pb2.GetUsageResponse(
-                tenant_id=data["tenant_id"],
-                metric=request.metric,
-                current=data["current"],
-                limit=data["limit"],
-                usage_ratio=data["current"] / data["limit"] if data["limit"] > 0 else 0.0,
-            )
+            metric_name = pb2.Metric.Name(request.metric)
+            with _tracer.start_as_current_span("quota.GetUsage") as span:
+                span.set_attribute("rpc.system", "grpc")
+                span.set_attribute("rpc.service", "QuotaService")
+                span.set_attribute("rpc.method", "GetUsage")
+                span.set_attribute("quota.tenant_id", request.tenant_id)
+                span.set_attribute("quota.metric", metric_name)
+                data = self._svc.get_usage(
+                    tenant_id=request.tenant_id,
+                    metric=metric_name,
+                )
+                span.set_attribute("quota.current", data["current"])
+                span.set_attribute("quota.limit", data["limit"])
+                return pb2.GetUsageResponse(
+                    tenant_id=data["tenant_id"],
+                    metric=request.metric,
+                    current=data["current"],
+                    limit=data["limit"],
+                    usage_ratio=data["current"] / data["limit"] if data["limit"] > 0 else 0.0,
+                )
 
         def Check(self, request, context):
             return pb2.HealthCheckResponse(status=pb2.HealthCheckResponse.SERVING)
@@ -203,6 +266,9 @@ def serve(cfg=None) -> None:
         redis_client=redis_client,
         get_limit_fn=get_limit_fn,
         skip_counter=_QUOTA_SKIPPED,
+        checks_counter=_QUOTA_CHECKS_TOTAL,
+        exceeded_counter=_QUOTA_EXCEEDED_TOTAL,
+        usage_ratio_gauge=_QUOTA_USAGE_RATIO,
     )
 
     # Start HTTP REST server for Kong plugin (runs regardless of gRPC availability)

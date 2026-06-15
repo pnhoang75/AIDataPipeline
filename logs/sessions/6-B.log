@@ -1,1 +1,14 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 6-B is complete. Here's what was delivered:
+
+**5 GrafanaDashboard CRDs** created in `k8s/pipeline/grafana-dashboards.yaml` and applied to the cluster (`monitoring` namespace):
+- `pipeline-overview` — document throughput, Kafka consumer lag, service error rates
+- `rag-performance` — p50/p95/p99 latency using `rag_request_duration_seconds_bucket`, cache hit rate
+- `quota-usage` — `quota_usage_ratio` per-tenant gauges, denied rate, gRPC latency p99
+- `data-quality` — `data_quality_failures_total` heatmap by check_name and tenant
+- `lineage-coverage` — `metadata_entities_total` per tenant over time, entity type distribution
+
+**PrometheusRule** `TenantNearQuota` added to `pipeline-alerts` — fires when `quota_usage_ratio > 0.8` for 1 minute.
+
+**ServiceMonitor** for `quota-service` added to expose `quota_checks_total`, `quota_exceeded_total`, `quota_grpc_duration_seconds`, and `quota_usage_ratio` to Prometheus.
+
+All 14 quota unit tests continue to pass. Sentinel `.sessions-done/6-B` created.

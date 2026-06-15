@@ -2,7 +2,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from opentelemetry import trace
+
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 
 @dataclass
@@ -37,39 +40,49 @@ class MilvusSearcher:
     ) -> List[SearchResult]:
         from pymilvus import Collection, utility
 
-        if not utility.has_collection(collection):
-            logger.warning("Collection %s not found; returning empty results", collection)
-            return []
+        with _tracer.start_as_current_span("milvus.search") as span:
+            span.set_attribute("db.system", "milvus")
+            span.set_attribute("milvus.collection", collection)
+            span.set_attribute("milvus.top_k", top_k)
+            if source_filter:
+                span.set_attribute("milvus.source_filter", source_filter)
 
-        col = Collection(collection)
-        col.load()
+            if not utility.has_collection(collection):
+                logger.warning("Collection %s not found; returning empty results", collection)
+                span.set_attribute("milvus.collection_found", False)
+                return []
 
-        expr = None
-        if source_filter:
-            expr = f'source_type == "{source_filter}"'
+            span.set_attribute("milvus.collection_found", True)
+            col = Collection(collection)
+            col.load()
 
-        results = col.search(
-            data=[vector],
-            anns_field="embedding",
-            param={"metric_type": "L2", "params": {"nprobe": 16}},
-            limit=top_k,
-            output_fields=["chunk_id", "text", "source_type", "doc_id", "metadata"],
-            expr=expr,
-        )
+            expr = None
+            if source_filter:
+                expr = f'source_type == "{source_filter}"'
 
-        hits = []
-        for hit in results[0]:
-            hits.append(
-                SearchResult(
-                    chunk_id=hit.entity.get("chunk_id", ""),
-                    text=hit.entity.get("text", ""),
-                    score=hit.distance,
-                    source_type=hit.entity.get("source_type", ""),
-                    doc_id=hit.entity.get("doc_id", ""),
-                    metadata=hit.entity.get("metadata") or {},
-                )
+            results = col.search(
+                data=[vector],
+                anns_field="embedding",
+                param={"metric_type": "L2", "params": {"nprobe": 16}},
+                limit=top_k,
+                output_fields=["chunk_id", "text", "source_type", "doc_id", "metadata"],
+                expr=expr,
             )
-        return hits
+
+            hits = []
+            for hit in results[0]:
+                hits.append(
+                    SearchResult(
+                        chunk_id=hit.entity.get("chunk_id", ""),
+                        text=hit.entity.get("text", ""),
+                        score=hit.distance,
+                        source_type=hit.entity.get("source_type", ""),
+                        doc_id=hit.entity.get("doc_id", ""),
+                        metadata=hit.entity.get("metadata") or {},
+                    )
+                )
+            span.set_attribute("milvus.result_count", len(hits))
+            return hits
 
     def close(self) -> None:
         try:

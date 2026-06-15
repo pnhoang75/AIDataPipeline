@@ -1,5 +1,9 @@
+# Testbed (kind): failurePolicy: Ignore keeps the cluster usable when Gatekeeper
+# is not yet running.  Production overlay (k8s/overlays/production/) patches
+# both webhook configurations to failurePolicy: Fail via a kustomize JSON-patch
+# so that admission failures block requests rather than allow-list them.
 validatingWebhook:
-  failurePolicy: Ignore
+  failurePolicy: Ignore  # overridden to Fail in k8s/overlays/production/
 
 mutatingWebhook:
-  failurePolicy: Ignore
+  failurePolicy: Ignore  # overridden to Fail in k8s/overlays/production/

@@ -1,1 +1,12 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 6-D is complete. Here's a summary of what was implemented:
+
+**Upgrade state machine** (`handlers.py`):
+- `reconcile_pipeline_cluster` — detects version bumps/rollbacks by comparing `old.spec.version` to `new.spec.version`; dispatches to `_run_coordinated_upgrade` with services in forward or reverse order
+- `_run_coordinated_upgrade` — executes the full sequence: set `UpgradeInProgress` → suspend connector CronJobs → drain Kafka lag → rolling restart each service → smoke test `GET /v1/health` → resume connectors → clear condition
+- `_drain_kafka_lag` — polls `get_kafka_consumer_lag` until 0; raises `TemporaryError` after 10-minute timeout
+- `_version_lt` — semver tuple comparison for upgrade vs. rollback detection
+- kopf handler registered on `pipelineclusters` `spec.version` field
+
+**K8sClient additions** (`k8s_client.py`): `suspend_cronjob`, `resume_cronjob`, `list_cronjobs`, `get_kafka_consumer_lag`, `wait_deployment_ready`, `http_get`
+
+**E2E test** (`tests/e2e/test_coordinated_upgrade.py`): 6 scenarios covering upgrade happy path, call ordering constraints, rollback reverse order, idempotency (no-op on same version), and smoke-test failure gate — all pass.

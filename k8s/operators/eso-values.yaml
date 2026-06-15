@@ -1,0 +1,64 @@
+# External Secrets Operator Helm values
+# Chart: external-secrets/external-secrets  version: 0.9.x
+# Namespace: infrastructure
+#
+# Install:
+#   helm repo add external-secrets https://charts.external-secrets.io
+#   helm upgrade --install eso external-secrets/external-secrets \
+#     -n infrastructure --create-namespace -f k8s/operators/eso-values.yaml
+#
+# After install, apply the ClusterSecretStore and ExternalSecret resources:
+#   kubectl apply -f k8s/pipeline/external-secrets.yaml
+
+installCRDs: true
+
+replicaCount: 2
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+
+metrics:
+  service:
+    enabled: true
+    port: 8080
+
+webhook:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+certController:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi

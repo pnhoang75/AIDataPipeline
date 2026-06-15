@@ -1,1 +1,5 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 5-F is complete. Here's what was done:
+
+- **E2E test passed** (`test_e2e_pdf_lineage_traces_to_datasource`): spins up a PostgreSQL testcontainer, seeds DataSource → RawDocument → DocumentChunk lineage, and verifies the `/api/lineage/upstream/{chunk_id}` recursive CTE returns the full chain with correct `source_path` and depth ordering.
+- **All deliverables were already in place** from the prior attempt: Metadata Service (FastAPI app, db.py, config, consumer), Dockerfile, k8s Deployment/Service/NetworkPolicy, FileBrowser lineage panel, Dashboard Data Quality tab, and SchemaVersion reconciliation hook in the pipeline operator.
+- Committed the untracked files (Dockerfile, requirements.txt, metadata-service.yaml, updated app.py/db.py) and created sentinel `.sessions-done/5-F`.

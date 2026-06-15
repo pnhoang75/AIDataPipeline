@@ -1,0 +1,6 @@
+Session 5-E is complete. All 7 integration tests passed:
+
+- **6 REST endpoint tests** in `TestLineageEndpoints`: upstream lineage chain, downstream impact set, stale embedding detection, RAG query provenance, pipeline run history, and quality checks
+- **1 Kafka consumer test** in `TestMetadataConsumer`: verifies that a `DataSource` CloudEvent published to Kafka is consumed and stored in PostgreSQL
+
+The only blocker was Docker's VM disk being full — freed ~4GB by removing the large service images that are no longer needed. Sentinel `.sessions-done/5-E` created and execution progress advanced to session 5-F.

@@ -5,6 +5,8 @@ namespace: ai-pipeline
 
 resources:
   - ../../pipeline
+  # External Secrets Operator resources — production only (requires ESO CRDs from eso-values.yaml)
+  - external-secrets.yaml
 
 # Production image tags are promoted manually from staging.
 # To update: run scripts/promote-to-production.sh <COMMIT_SHA>
@@ -31,7 +33,8 @@ images:
   - name: ghcr.io/pnhoang75/ai-data-pipeline/metadata-service
     newTag: PROMOTE_FROM_STAGING
 
-# Production-specific patches: full replicas, Gatekeeper failurePolicy:Fail overlay
+# Production-specific patches: full replicas, Gatekeeper failurePolicy:Fail,
+# Gatekeeper constraint enforcementAction:deny, ESO SecretStore.
 patches:
   - patch: |-
       apiVersion: apps/v1
@@ -64,6 +67,39 @@ patches:
       - op: replace
         path: /webhooks/0/failurePolicy
         value: Fail
+  # Upgrade constraint enforcementAction from warn (testbed) to deny (production)
+  - target:
+      group: constraints.gatekeeper.sh
+      kind: K8sRequireNonRootUser
+      name: require-non-root-user
+    patch: |-
+      - op: replace
+        path: /spec/enforcementAction
+        value: deny
+  - target:
+      group: constraints.gatekeeper.sh
+      kind: K8sRequireReadOnlyRootFS
+      name: require-read-only-root-fs
+    patch: |-
+      - op: replace
+        path: /spec/enforcementAction
+        value: deny
+  - target:
+      group: constraints.gatekeeper.sh
+      kind: K8sRequireResourceLimits
+      name: require-resource-limits
+    patch: |-
+      - op: replace
+        path: /spec/enforcementAction
+        value: deny
+  - target:
+      group: constraints.gatekeeper.sh
+      kind: K8sBlockLatestImageTag
+      name: block-latest-image-tag
+    patch: |-
+      - op: replace
+        path: /spec/enforcementAction
+        value: deny
 
 commonLabels:
   environment: production

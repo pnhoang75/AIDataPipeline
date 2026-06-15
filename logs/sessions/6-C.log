@@ -1,1 +1,13 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 6-C is complete. Here's what was done:
+
+**Span coverage added/verified:**
+- `milvus.search` — already in `milvus_searcher.py` ✓
+- `milvus.upsert` — already in `embedding-worker/worker.py` ✓
+- `redis.get` / `redis.setex` — already in `rag-api/app.py` ✓
+- `kafka.produce` / `kafka.consume` — already in `embedding-worker/worker.py` ✓
+- `quota.CheckQuota` / `RecordUsage` / `GetUsage` — already in `quota-service/server.py` ✓
+- **New:** `redis.quota.incrby`, `redis.quota.get`, `redis.quota.record_usage` added to `quota_service.py`
+
+**Tests:** 4 new OTel span tests in `test_quota_service.py`; fixed `test_milvus_search_span_emitted` patch target in `test_rag_api.py` (all 38 tests pass across both suites)
+
+**K8s:** All 8 pipeline deployments already had `instrumentation.opentelemetry.io/inject-python: "true"`; Tempo pod is `1/1 Running` in `monitoring` namespace; OTel Collector routes traces to Tempo via `otlphttp/tempo` exporter

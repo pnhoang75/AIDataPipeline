@@ -1,1 +1,20 @@
-You've hit your session limit · resets 4:20pm (America/Los_Angeles)
+Session 6-E complete. Here's what was delivered:
+
+**`.github/workflows/ci.yaml`** — 4-job pipeline:
+1. **lint** — `ruff check` + `mypy` on all services (ignore-missing-imports)
+2. **unit-tests** — matrix over 8 service test dirs, each with its own requirements
+3. **build-and-push** — matrix over 9 services, tags with `${{ github.sha }}` only (no `:latest`); runs on `main` pushes only
+4. **trivy-scan** — CRITICAL CVE gate with `exit-code: 1`; SARIF uploaded to GitHub Security tab
+
+**ArgoCD Image Updater setup:**
+- `k8s/operators/argocd-image-updater-values.yaml` — Helm values, ghcr.io registry, git write-back
+- `k8s/operators/argocd-staging-app.yaml` — staging Application with `digest` update strategy and auto-sync
+- `k8s/operators/argocd-production-app.yaml` — production Application with manual sync only
+
+**Per-environment Kustomize overlays:**
+- `k8s/overlays/staging/kustomization.yaml` — lower replicas, Image Updater writes SHA tags here
+- `k8s/overlays/production/kustomization.yaml` — full replicas, `:latest` blocked via Gatekeeper constraint, Gatekeeper `failurePolicy: Fail` patch
+
+**`k8s/operators/argocd-applicationset.yaml`** — ApplicationSet generating Applications for `kind`, `staging`, `production` environments.
+
+**`scripts/promote-to-production.sh`** — promotes a staging SHA to production by updating `kustomization.yaml` and committing (rollback via `git revert`).
