@@ -7,7 +7,10 @@ import logging
 from enum import IntEnum
 from typing import Callable, Optional
 
+from opentelemetry import trace
+
 logger = logging.getLogger(__name__)
+_tracer = trace.get_tracer(__name__)
 
 
 class QuotaStatus(IntEnum):
@@ -65,6 +68,9 @@ class QuotaService:
             default).  None means unlimited (Enterprise / NULL in DB).
         skip_counter: optional object with an ``.inc()`` method, incremented
             when Redis is unavailable.  Pass a Prometheus Counter or a mock.
+        checks_counter: optional Counter with labels [tenant_id, metric, status].
+        exceeded_counter: optional Counter with labels [tenant_id, metric].
+        usage_ratio_gauge: optional Gauge with labels [tenant_id, metric].
     """
 
     def __init__(
@@ -72,10 +78,31 @@ class QuotaService:
         redis_client,
         get_limit_fn: Callable[[str, str], Optional[int]],
         skip_counter=None,
+        checks_counter=None,
+        exceeded_counter=None,
+        usage_ratio_gauge=None,
     ) -> None:
         self.redis = redis_client
         self._get_limit = get_limit_fn
         self._skip_counter = skip_counter
+        self._checks_counter = checks_counter
+        self._exceeded_counter = exceeded_counter
+        self._usage_ratio_gauge = usage_ratio_gauge
+
+    # ── metrics helpers ───────────────────────────────────────────────────────
+
+    def _record_check_metrics(self, tenant_id: str, metric: str, result: "CheckResult") -> None:
+        status_name = QuotaStatus(result.status).name
+        if self._checks_counter is not None:
+            self._checks_counter.labels(
+                tenant_id=tenant_id, metric=metric, status=status_name
+            ).inc()
+        if result.status == QuotaStatus.DENIED and self._exceeded_counter is not None:
+            self._exceeded_counter.labels(tenant_id=tenant_id, metric=metric).inc()
+        if self._usage_ratio_gauge is not None and result.limit > 0:
+            self._usage_ratio_gauge.labels(tenant_id=tenant_id, metric=metric).set(
+                result.current_usage / result.limit
+            )
 
     # ── key helpers ──────────────────────────────────────────────────────────
 
@@ -105,32 +132,56 @@ class QuotaService:
         """
         limit = self._get_limit(tenant_id, metric)
         if limit is None:
+            if self._checks_counter is not None:
+                self._checks_counter.labels(
+                    tenant_id=tenant_id, metric=metric, status="UNLIMITED"
+                ).inc()
             return CheckResult(QuotaStatus.UNLIMITED, current_usage=0, limit=0)
 
         try:
             key = self._quota_key(tenant_id, metric)
             if increment_on_allow:
-                pipe = self.redis.pipeline()
-                pipe.incrby(key, amount)
-                pipe.expire(key, self._ttl(metric))
-                current, _ = pipe.execute()
+                with _tracer.start_as_current_span("redis.quota.incrby") as span:
+                    span.set_attribute("db.system", "redis")
+                    span.set_attribute("db.operation", "INCRBY+EXPIRE")
+                    span.set_attribute("quota.tenant_id", tenant_id)
+                    span.set_attribute("quota.metric", metric)
+                    pipe = self.redis.pipeline()
+                    pipe.incrby(key, amount)
+                    pipe.expire(key, self._ttl(metric))
+                    current, _ = pipe.execute()
+                    span.set_attribute("quota.current_after_incr", current)
                 if current > limit:
                     self.redis.decrby(key, amount)  # rollback
-                    return CheckResult(
+                    result = CheckResult(
                         QuotaStatus.DENIED,
                         current_usage=current - amount,
                         limit=limit,
                         deny_reason=f"Quota exceeded for metric {metric}",
                     )
-                return CheckResult(QuotaStatus.ALLOWED, current_usage=current, limit=limit)
+                    self._record_check_metrics(tenant_id, metric, result)
+                    return result
+                result = CheckResult(QuotaStatus.ALLOWED, current_usage=current, limit=limit)
+                self._record_check_metrics(tenant_id, metric, result)
+                return result
             else:
-                # Read-only check — caller records separately
-                current = int(self.redis.get(key) or 0)
+                with _tracer.start_as_current_span("redis.quota.get") as span:
+                    span.set_attribute("db.system", "redis")
+                    span.set_attribute("db.operation", "GET")
+                    span.set_attribute("quota.tenant_id", tenant_id)
+                    span.set_attribute("quota.metric", metric)
+                    # Read-only check — caller records separately
+                    current = int(self.redis.get(key) or 0)
+                    span.set_attribute("quota.current", current)
                 if current + amount > limit:
-                    return CheckResult(
+                    result = CheckResult(
                         QuotaStatus.DENIED, current_usage=current, limit=limit
                     )
-                return CheckResult(QuotaStatus.ALLOWED, current_usage=current, limit=limit)
+                    self._record_check_metrics(tenant_id, metric, result)
+                    return result
+                result = CheckResult(QuotaStatus.ALLOWED, current_usage=current, limit=limit)
+                self._record_check_metrics(tenant_id, metric, result)
+                return result
 
         except Exception:
             if self._skip_counter is not None:
@@ -152,13 +203,21 @@ class QuotaService:
         event_id: str,
     ) -> RecordResult:
         """Record usage with idempotency: duplicate event_ids within 24 h are ignored."""
-        dedup_key = self._dedup_key(event_id)
-        if self.redis.exists(dedup_key):
-            return RecordResult(deduped=True)
-        # Mark event_id as seen (24-hour TTL)
-        self.redis.setex(dedup_key, 86_400, 1)
-        key = self._quota_key(tenant_id, metric)
-        new_total = int(self.redis.incrby(key, amount))
+        with _tracer.start_as_current_span("redis.quota.record_usage") as span:
+            span.set_attribute("db.system", "redis")
+            span.set_attribute("quota.tenant_id", tenant_id)
+            span.set_attribute("quota.metric", metric)
+            span.set_attribute("quota.amount", amount)
+            dedup_key = self._dedup_key(event_id)
+            if self.redis.exists(dedup_key):
+                span.set_attribute("quota.deduped", True)
+                return RecordResult(deduped=True)
+            # Mark event_id as seen (24-hour TTL)
+            self.redis.setex(dedup_key, 86_400, 1)
+            key = self._quota_key(tenant_id, metric)
+            new_total = int(self.redis.incrby(key, amount))
+            span.set_attribute("quota.deduped", False)
+            span.set_attribute("quota.new_total", new_total)
         return RecordResult(new_total=new_total, deduped=False)
 
     # ── GetUsage ──────────────────────────────────────────────────────────────

@@ -350,3 +350,95 @@ class TestUsagePublisherUnit:
 
         # Should not raise
         pub.publish_rag_query(tenant_id="t", duration_ms=1.0, result_count=0, cached=False)
+
+
+# ─── OTel span tests ─────────────────────────────────────────────────────────
+
+import app as app_mod
+import milvus_searcher as ms_mod
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+
+@pytest.fixture
+def span_exporter_rag():
+    """Patch both app and milvus_searcher module tracers; restore on teardown."""
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    tracer = provider.get_tracer("test")
+
+    orig_app_tracer = app_mod._tracer
+    orig_ms_tracer = ms_mod._tracer
+    app_mod._tracer = tracer
+    ms_mod._tracer = tracer
+    yield exporter
+    app_mod._tracer = orig_app_tracer
+    ms_mod._tracer = orig_ms_tracer
+    exporter.clear()
+
+
+class TestOTelSpans:
+    def test_milvus_search_span_emitted(self, span_exporter_rag):
+        """milvus_searcher.search() emits a milvus.search span with expected attributes."""
+        from milvus_searcher import MilvusSearcher
+
+        searcher = MilvusSearcher.__new__(MilvusSearcher)
+        searcher._host = "localhost"
+        searcher._port = 19530
+        searcher._dim = 384
+
+        with patch("pymilvus.Collection"), patch(
+            "pymilvus.utility"
+        ) as mock_util:
+            mock_util.has_collection.return_value = False
+            searcher.search("tenant1_docs", [0.1] * 384, top_k=5)
+
+        spans = span_exporter_rag.get_finished_spans()
+        span = next((s for s in spans if s.name == "milvus.search"), None)
+        assert span is not None, "milvus.search span was not emitted"
+        assert span.attributes["db.system"] == "milvus"
+        assert span.attributes["milvus.collection"] == "tenant1_docs"
+        assert span.attributes["milvus.top_k"] == 5
+
+    def test_redis_get_span_on_cache_miss(self, span_exporter_rag):
+        """RagService.query() emits a redis.get span on every request."""
+        service, _, redis, _, _ = _make_service()
+        redis.get.return_value = None  # cache miss
+
+        _query(service)
+
+        spans = span_exporter_rag.get_finished_spans()
+        span = next((s for s in spans if s.name == "redis.get"), None)
+        assert span is not None, "redis.get span was not emitted"
+        assert span.attributes["db.system"] == "redis"
+        assert span.attributes["db.operation"] == "GET"
+        assert span.attributes["redis.cache_hit"] is False
+
+    def test_redis_get_span_on_cache_hit(self, span_exporter_rag):
+        """RagService.query() emits redis.get with cache_hit=True on a cache hit."""
+        service, _, redis, _, _ = _make_service()
+        cached = json.dumps([{"chunk_id": "c1", "text": "x", "score": 0.9,
+                               "source_type": "s3", "doc_id": "d1", "metadata": {}}])
+        redis.get.return_value = cached.encode()
+
+        _query(service)
+
+        spans = span_exporter_rag.get_finished_spans()
+        span = next((s for s in spans if s.name == "redis.get"), None)
+        assert span is not None
+        assert span.attributes["redis.cache_hit"] is True
+
+    def test_redis_setex_span_on_cache_miss(self, span_exporter_rag):
+        """RagService.query() emits a redis.setex span when storing a new result."""
+        service, _, redis, _, _ = _make_service()
+        redis.get.return_value = None  # cache miss → triggers setex
+
+        _query(service)
+
+        spans = span_exporter_rag.get_finished_spans()
+        span = next((s for s in spans if s.name == "redis.setex"), None)
+        assert span is not None, "redis.setex span was not emitted"
+        assert span.attributes["db.system"] == "redis"
+        assert span.attributes["db.operation"] == "SETEX"
