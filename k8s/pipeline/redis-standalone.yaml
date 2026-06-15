@@ -5,7 +5,7 @@ metadata:
   namespace: infrastructure
 spec:
   sentinel:
-    replicas: 1
+    replicas: 3  # quorum requires ≥ 3 sentinels for reliable failover
     resources:
       requests:
         cpu: "50m"
@@ -14,7 +14,7 @@ spec:
         cpu: "100m"
         memory: 128Mi
   redis:
-    replicas: 1
+    replicas: 3  # 1 primary + 2 replicas for HA
     storage:
       persistentVolumeClaim:
         metadata:

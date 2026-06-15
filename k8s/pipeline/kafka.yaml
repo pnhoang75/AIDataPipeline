@@ -1,5 +1,5 @@
 ---
-# KafkaNodePool: single combined broker+controller node (KRaft testbed)
+# KafkaNodePool: 3 combined broker+controller nodes (KRaft HA)
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
@@ -8,7 +8,7 @@ metadata:
   labels:
     strimzi.io/cluster: ai-pipeline-kafka
 spec:
-  replicas: 1
+  replicas: 3
   roles:
     - controller
     - broker
@@ -24,7 +24,7 @@ spec:
       memory: 2Gi
       cpu: "1"
 ---
-# Kafka cluster: single-broker KRaft, Strimzi 1.0.0 / Kafka 4.2.0
+# Kafka cluster: 3-broker KRaft HA, Strimzi 1.0.0 / Kafka 4.2.0
 apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
@@ -47,11 +47,11 @@ spec:
         type: internal
         tls: true
     config:
-      offsets.topic.replication.factor: "1"
-      transaction.state.log.replication.factor: "1"
-      transaction.state.log.min.isr: "1"
-      default.replication.factor: "1"
-      min.insync.replicas: "1"
+      offsets.topic.replication.factor: "3"
+      transaction.state.log.replication.factor: "3"
+      transaction.state.log.min.isr: "2"
+      default.replication.factor: "3"
+      min.insync.replicas: "2"
     livenessProbe:
       initialDelaySeconds: 60
       timeoutSeconds: 10

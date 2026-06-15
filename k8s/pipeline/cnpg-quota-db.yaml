@@ -4,7 +4,7 @@ metadata:
   name: quota-db
   namespace: infrastructure
 spec:
-  instances: 1
+  instances: 2  # primary + read replica with automatic failover
   imageName: ghcr.io/cloudnative-pg/postgresql:16.2
   storage:
     size: 10Gi
