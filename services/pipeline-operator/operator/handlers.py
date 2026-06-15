@@ -10,6 +10,7 @@ Import path note: this module supports two import modes:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
@@ -38,8 +39,16 @@ _METADATA_SERVICE_URL = os.environ.get(
 _KAFKA_CLUSTER = "ai-pipeline-kafka"
 _KAFKA_TOPIC = "raw-documents"
 _CONNECTOR_SA = "connector-sa"
-# Nearest-minute CronJob approximation of "every 30 s" (K8s minimum is 1 min)
 _UPLOAD_WATCHER_SCHEDULE = "* * * * *"
+
+# Upgrade state machine constants
+_SERVICES_UPGRADE_ORDER = ["doc-processor", "embedding-worker", "rag-api"]
+_CONNECTOR_LABEL_SELECTOR = "pipeline.ai-pipeline.io/kind=connector"
+_KAFKA_CONSUMER_GROUP = "doc-processor-group"
+_RAG_API_HEALTH_URL = os.environ.get(
+    "RAG_API_HEALTH_URL", "http://rag-api.ai-pipeline.svc:8000/v1/health"
+)
+_UPGRADE_DRAIN_TIMEOUT_S = int(os.environ.get("UPGRADE_DRAIN_TIMEOUT_S", "600"))
 
 # Expose TemporaryError so tests don't need to import kopf directly.
 if _kopf_available:
@@ -203,6 +212,92 @@ async def reconcile_embedding(
 
 
 # ---------------------------------------------------------------------------
+# PipelineCluster reconcile — coordinated upgrade / rollback state machine
+# ---------------------------------------------------------------------------
+
+async def reconcile_pipeline_cluster(
+    spec: dict,
+    old: dict,
+    new: dict,
+    namespace: str,
+    patch: object,
+    **kwargs,
+) -> None:
+    """Run a coordinated upgrade or rollback when PipelineCluster.spec.version changes."""
+    old_version = (old.get("spec") or {}).get("version", "")
+    new_version = (new.get("spec") or {}).get("version", spec.get("version", ""))
+
+    if not old_version or old_version == new_version:
+        return
+
+    is_rollback = _version_lt(new_version, old_version)
+    services = (
+        list(reversed(_SERVICES_UPGRADE_ORDER)) if is_rollback else _SERVICES_UPGRADE_ORDER
+    )
+    await _run_coordinated_upgrade(namespace, patch, services)
+
+
+async def _run_coordinated_upgrade(
+    namespace: str,
+    patch: object,
+    services: list[str],
+) -> None:
+    """Execute the upgrade state machine for the given service roll order."""
+    patch.status["upgradeInProgress"] = True  # type: ignore[index]
+    patch.status["state"] = "UpgradeInProgress"  # type: ignore[index]
+
+    connector_crons = await _client.list_cronjobs(namespace, _CONNECTOR_LABEL_SELECTOR)
+    for cron in connector_crons:
+        await _client.suspend_cronjob(cron, namespace)
+
+    await _drain_kafka_lag(namespace)
+
+    for svc in services:
+        await _client.rollout_restart("deployment", svc, namespace)
+        await _client.wait_deployment_ready(svc, namespace)
+
+    health_status = await _client.http_get(_RAG_API_HEALTH_URL)
+    if health_status != 200:
+        raise TemporaryError(
+            f"RAG API smoke test failed: HTTP {health_status}", delay=30
+        )
+
+    for cron in connector_crons:
+        await _client.resume_cronjob(cron, namespace)
+
+    patch.status["upgradeInProgress"] = False  # type: ignore[index]
+    patch.status["state"] = "Ready"  # type: ignore[index]
+
+
+async def _drain_kafka_lag(namespace: str) -> None:
+    """Poll Kafka consumer lag until 0; raise TemporaryError on timeout."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _UPGRADE_DRAIN_TIMEOUT_S
+    while True:
+        lag = await _client.get_kafka_consumer_lag(
+            _KAFKA_TOPIC, _KAFKA_CONSUMER_GROUP, namespace
+        )
+        if lag == 0:
+            return
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            raise TemporaryError(
+                "Kafka consumer lag did not drain within timeout", delay=60
+            )
+        await asyncio.sleep(min(5.0, remaining))
+
+
+def _version_lt(v1: str, v2: str) -> bool:
+    """Return True if semantic version v1 is strictly less than v2."""
+    def _parts(v: str) -> tuple:
+        try:
+            return tuple(int(x) for x in v.split("."))
+        except ValueError:
+            return (0,)
+    return _parts(v1) < _parts(v2)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -251,5 +346,11 @@ if _kopf_available:
     @_kopf.on.update("ai-pipeline.io", "v1alpha1", "embeddingconfigs", field="spec")  # type: ignore[misc]
     async def handle_embedding_update(spec, old, new, namespace, patch, **kwargs):
         await reconcile_embedding(
+            spec=spec, old=old, new=new, namespace=namespace, patch=patch, **kwargs
+        )
+
+    @_kopf.on.update("ai-pipeline.io", "v1alpha1", "pipelineclusters", field="spec.version")  # type: ignore[misc]
+    async def handle_pipeline_cluster_update(spec, old, new, namespace, patch, **kwargs):
+        await reconcile_pipeline_cluster(
             spec=spec, old=old, new=new, namespace=namespace, patch=patch, **kwargs
         )

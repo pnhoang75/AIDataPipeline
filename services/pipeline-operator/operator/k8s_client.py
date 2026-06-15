@@ -64,3 +64,27 @@ class K8sClient:
         self, kind: str, name: str, namespace: str
     ) -> None:
         pass
+
+    async def suspend_cronjob(self, name: str, namespace: str) -> None:
+        pass
+
+    async def resume_cronjob(self, name: str, namespace: str) -> None:
+        pass
+
+    async def list_cronjobs(
+        self, namespace: str, label_selector: str = ""
+    ) -> list[str]:
+        return []
+
+    async def get_kafka_consumer_lag(
+        self, topic: str, consumer_group: str, namespace: str
+    ) -> int:
+        return 0
+
+    async def wait_deployment_ready(
+        self, name: str, namespace: str, timeout: int = 300
+    ) -> None:
+        pass
+
+    async def http_get(self, url: str, timeout: float = 10.0) -> int:
+        return 200
