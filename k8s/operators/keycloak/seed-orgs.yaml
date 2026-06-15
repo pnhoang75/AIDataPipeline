@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-seed-orgs
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: curlimages/curl:8.5.0
+          command:
+            - sh
+            - -ec
+            - |
+              KC=http://keycloak-service.keycloak.svc.cluster.local:80
+
+              # Wait for Keycloak to be ready
+              until curl -sf "$KC/realms/master/.well-known/openid-configuration" > /dev/null; do
+                echo "waiting for keycloak..." && sleep 5
+              done
+
+              # Obtain admin token
+              TOKEN=$(curl -sf -X POST \
+                "$KC/realms/master/protocol/openid-connect/token" \
+                -d "grant_type=password&client_id=admin-cli&username=$ADMIN_USER&password=$ADMIN_PASS" \
+                | sed 's/.*"access_token":"\([^"]*\)".*/\1/')
+
+              AUTH="Authorization: Bearer $TOKEN"
+
+              create_org() {
+                local name="$1" alias="$2" tier="$3"
+                curl -sf -o /dev/null -X POST \
+                  "$KC/admin/realms/ai-pipeline/organizations" \
+                  -H "$AUTH" \
+                  -H "Content-Type: application/json" \
+                  -d "{\"name\":\"$name\",\"alias\":\"$alias\",\"enabled\":true,\"attributes\":{\"license_type\":[\"$tier\"],\"quota_tier\":[\"$tier\"]}}" \
+                  && echo "created org: $alias" \
+                  || echo "org may already exist: $alias"
+              }
+
+              create_org "Free Tier Demo"  "free-tier-demo"  "free"
+              create_org "Pro Tier Demo"   "pro-tier-demo"   "pro"
+          env:
+            - name: ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-secret
+                  key: username
+            - name: ADMIN_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-secret
+                  key: password
