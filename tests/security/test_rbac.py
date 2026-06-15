@@ -48,13 +48,14 @@ class TestConnectorRoleNoWildcards:
         """Operator creates per-connector Role with resourceNames: ['connector-acme-s3-creds'].
 
         This is the primary assertion from test plan §2.7.
+        BFF naming convention: connector-{slug}-creds (includes the 'connector-' prefix).
         """
         role = make_connector_role("acme-s3", namespace="ai-pipeline")
 
         secret_rule = next(
             r for r in role["rules"] if "secrets" in r.get("resources", [])
         )
-        assert secret_rule["resourceNames"] == ["acme-s3-creds"]
+        assert secret_rule["resourceNames"] == ["connector-acme-s3-creds"]
 
     def test_connector_role_has_no_wildcard_resource_names(self):
         """No resourceName in the generated Role may contain a '*'."""
@@ -150,7 +151,7 @@ class TestConnectorSecretName:
     """Unit tests for the secret name derivation function."""
 
     def test_secret_name_includes_connector_name(self):
-        assert connector_secret_name("acme-s3") == "acme-s3-creds"
+        assert connector_secret_name("acme-s3") == "connector-acme-s3-creds"
 
     def test_secret_name_different_per_connector(self):
         assert connector_secret_name("acme-s3") != connector_secret_name("corp-nfs")
