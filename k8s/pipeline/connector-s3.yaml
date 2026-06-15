@@ -20,6 +20,8 @@ spec:
     metadata:
       labels:
         app: connector-s3
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"
     spec:
       serviceAccountName: connector-s3
       securityContext:

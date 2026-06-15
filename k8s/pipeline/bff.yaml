@@ -83,6 +83,8 @@ spec:
     metadata:
       labels:
         app: pipeline-mgmt-api
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"
     spec:
       serviceAccountName: bff-sa
       automountServiceAccountToken: true

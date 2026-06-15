@@ -20,6 +20,8 @@ spec:
     metadata:
       labels:
         app: quota-service
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"
     spec:
       serviceAccountName: quota-service
       securityContext:

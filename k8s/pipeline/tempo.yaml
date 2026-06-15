@@ -1,0 +1,169 @@
+---
+# Tempo — distributed tracing backend (single-binary testbed)
+# Receives OTLP traces from the OTel Collector; Grafana queries via HTTP API.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: monitoring
+  labels:
+    app: tempo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tempo
+  template:
+    metadata:
+      labels:
+        app: tempo
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tempo
+          image: grafana/tempo:2.4.1
+          args: ["-config.file=/etc/tempo/tempo.yaml"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - containerPort: 3200
+              name: http
+            - containerPort: 4317
+              name: otlp-grpc
+            - containerPort: 4318
+              name: otlp-http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo
+            - name: data
+              mountPath: /tmp/tempo
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3200
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 3200
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: tempo-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo-config
+  namespace: monitoring
+data:
+  tempo.yaml: |
+    server:
+      http_listen_port: 3200
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+    ingester:
+      trace_idle_period: 10s
+      max_block_bytes: 1_000_000
+      max_block_duration: 5m
+    compactor:
+      compaction:
+        block_retention: 168h  # 7 days for testbed
+    storage:
+      trace:
+        backend: local
+        local:
+          path: /tmp/tempo/blocks
+        wal:
+          path: /tmp/tempo/wal
+    query_frontend:
+      search:
+        duration_slo: 5s
+        throughput_bytes_slo: 1.073741824e+09
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: monitoring
+  labels:
+    app: tempo
+spec:
+  selector:
+    app: tempo
+  ports:
+    - name: http
+      port: 3100
+      targetPort: 3200
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+  type: ClusterIP
+---
+# Grafana Tempo datasource via GrafanaDatasource CR (Grafana Operator)
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: tempo
+  namespace: monitoring
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  datasource:
+    name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo.monitoring.svc.cluster.local:3100
+    isDefault: false
+    jsonData:
+      httpMethod: GET
+      tracesToLogs:
+        datasourceUid: loki
+        filterByTraceID: true
+        filterBySpanID: false
+        mapTagNamesEnabled: false
+        tags:
+          - key: service.name
+            value: service
+      tracesToMetrics:
+        datasourceUid: prometheus
+        tags:
+          - key: service.name
+            value: job
+      serviceMap:
+        datasourceUid: prometheus
+      search:
+        hide: false
+      nodeGraph:
+        enabled: true

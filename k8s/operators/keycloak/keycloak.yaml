@@ -30,3 +30,22 @@ spec:
       value: "true"
     - name: legacy-observability-interface
       value: "true"
+  unsupported:
+    podTemplate:
+      spec:
+        containers:
+          - name: keycloak
+            env:
+              - name: KC_JAVA_OPTS_APPEND
+                value: "-Dvertx.cacheDirBase=/dev/shm/vertx-cache"
+              - name: JAVA_OPTS_APPEND
+                value: "-Dvertx.cacheDirBase=/dev/shm/vertx-cache"
+            startupProbe:
+              httpGet:
+                path: /realms/master
+                port: 8080
+                scheme: HTTP
+              failureThreshold: 600
+              periodSeconds: 1
+              successThreshold: 1
+              timeoutSeconds: 5

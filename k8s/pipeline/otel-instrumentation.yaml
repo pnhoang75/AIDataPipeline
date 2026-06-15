@@ -1,0 +1,32 @@
+---
+# OTel Operator Instrumentation CR — referenced by the inject-python annotation on all pods.
+# The OTel Operator webhook reads this CR and configures the OTLP exporter env vars
+# on every pod annotated with instrumentation.opentelemetry.io/inject-python: "true".
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: pipeline-instrumentation
+  namespace: ai-pipeline
+spec:
+  exporter:
+    endpoint: http://pipeline-collector-collector.monitoring.svc.cluster.local:4318
+  propagators:
+    - tracecontext
+    - baggage
+  sampler:
+    type: parentbased_traceidratio
+    argument: "1.0"
+  python:
+    env:
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: http://pipeline-collector-collector.monitoring.svc.cluster.local:4318
+      - name: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: http/protobuf
+      - name: OTEL_TRACES_SAMPLER
+        value: parentbased_traceidratio
+      - name: OTEL_TRACES_SAMPLER_ARG
+        value: "1.0"
+      - name: OTEL_METRICS_EXPORTER
+        value: none
+      - name: OTEL_LOGS_EXPORTER
+        value: none

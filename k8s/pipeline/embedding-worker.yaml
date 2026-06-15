@@ -20,6 +20,8 @@ spec:
     metadata:
       labels:
         app: embedding-worker
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"
     spec:
       serviceAccountName: embedding-worker
       securityContext:

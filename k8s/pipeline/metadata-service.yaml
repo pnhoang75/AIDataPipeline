@@ -20,6 +20,8 @@ spec:
     metadata:
       labels:
         app: metadata-service
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"
     spec:
       serviceAccountName: metadata-service
       securityContext:

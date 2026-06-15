@@ -88,6 +88,8 @@ spec:
     metadata:
       labels:
         app: pipeline-operator
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"
     spec:
       serviceAccountName: pipeline-operator-sa
       # Override SA-level automountServiceAccountToken=false so kopf can use

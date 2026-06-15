@@ -20,6 +20,8 @@ spec:
     metadata:
       labels:
         app: rag-api
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"
     spec:
       serviceAccountName: rag-api
       securityContext:

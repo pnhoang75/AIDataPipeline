@@ -20,6 +20,8 @@ spec:
     metadata:
       labels:
         app: doc-processor
+      annotations:
+        instrumentation.opentelemetry.io/inject-python: "true"
     spec:
       serviceAccountName: doc-processor
       securityContext:
