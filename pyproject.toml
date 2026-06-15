@@ -1,0 +1,26 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+    "**/migrations/**",
+    "**/.venv/**",
+    "**/node_modules/**",
+]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: isort
+select = ["E", "W", "F", "I"]
+ignore = [
+    "E501",  # line-length enforced by formatter, not linter
+]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_return_any = false
+no_error_summary = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

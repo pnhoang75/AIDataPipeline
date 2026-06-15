@@ -1,0 +1,45 @@
+# ArgoCD ApplicationSet — per-environment overlays
+# Generates one Application per environment from k8s/overlays/{env}/kustomization.yaml.
+# Environments: kind (testbed), staging, production.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: ai-pipeline-environments
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - env: kind
+            namespace: ai-pipeline
+            sync: automated   # kind testbed auto-syncs
+          - env: staging
+            namespace: ai-pipeline
+            sync: automated   # staging auto-syncs (Image Updater writes new tags)
+          - env: production
+            namespace: ai-pipeline
+            sync: manual      # production requires manual sync approval
+
+  template:
+    metadata:
+      name: "ai-pipeline-{{env}}"
+      namespace: argocd
+      annotations:
+        # Image Updater annotations are added per-env via the dedicated
+        # argocd-staging-app.yaml (staging only). This ApplicationSet
+        # manages the overlay structure; Image Updater is configured separately.
+        notifications.argoproj.io/subscribe.on-sync-succeeded.slack: pipeline-deploys
+        notifications.argoproj.io/subscribe.on-sync-failed.slack: pipeline-alerts
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/pnhoang75/AIDataPipeline.git
+        targetRevision: main
+        path: "k8s/overlays/{{env}}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{namespace}}"
+      syncPolicy:
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

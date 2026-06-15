@@ -1,0 +1,57 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ai-pipeline
+
+# Base manifests from the pipeline directory
+resources:
+  - ../../pipeline
+
+# Image Updater writes the actual SHA tags here via .argocd-source-ai-pipeline-staging.yaml.
+# Specify placeholder tags here; Image Updater overrides them at deploy time.
+images:
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/rag-api
+    newTag: latest-staging
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/quota-service
+    newTag: latest-staging
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/embedding-worker
+    newTag: latest-staging
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/bff
+    newTag: latest-staging
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/connector-s3
+    newTag: latest-staging
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/connector-nfs
+    newTag: latest-staging
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/doc-processor
+    newTag: latest-staging
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/pipeline-operator
+    newTag: latest-staging
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/metadata-service
+    newTag: latest-staging
+
+# Staging-specific patches: lower replica counts, reduced resource limits
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: rag-api
+      spec:
+        replicas: 1
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: embedding-worker
+      spec:
+        replicas: 1
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: doc-processor
+      spec:
+        replicas: 1
+
+commonLabels:
+  environment: staging

@@ -1,0 +1,28 @@
+# ArgoCD Image Updater — Helm values
+# Install with:
+#   helm repo add argo https://argoproj.github.io/argo-helm
+#   helm upgrade --install argocd-image-updater argo/argocd-image-updater \
+#     -n argocd --create-namespace -f k8s/operators/argocd-image-updater-values.yaml
+
+config:
+  # Write image tag updates back to git so ArgoCD syncs them (full GitOps audit trail)
+  argocd:
+    serverAddress: argocd-server.argocd.svc.cluster.local
+    insecure: false
+    plaintext: false
+
+  registries:
+    - name: ghcr
+      prefix: ghcr.io
+      apiurl: https://ghcr.io
+      credentials: pullsecret:argocd/ghcr-credentials
+      defaultns: library
+      insecure: false
+
+# ServiceAccount needs to read Applications and write back commits
+serviceAccount:
+  create: true
+  name: argocd-image-updater
+
+# Log at info level for audit trail
+logLevel: info

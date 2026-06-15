@@ -1,0 +1,56 @@
+# ArgoCD Application — staging environment
+# ArgoCD Image Updater watches this Application and auto-updates image tags
+# when CI pushes new SHA-tagged images to ghcr.io.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ai-pipeline-staging
+  namespace: argocd
+  annotations:
+    # Comma-separated list of images for Image Updater to track.
+    # Each alias maps to an image in the kustomization image overrides below.
+    argocd-image-updater.argoproj.io/image-list: >-
+      rag-api=ghcr.io/pnhoang75/ai-data-pipeline/rag-api,
+      quota-service=ghcr.io/pnhoang75/ai-data-pipeline/quota-service,
+      embedding-worker=ghcr.io/pnhoang75/ai-data-pipeline/embedding-worker,
+      bff=ghcr.io/pnhoang75/ai-data-pipeline/bff,
+      connector-s3=ghcr.io/pnhoang75/ai-data-pipeline/connector-s3,
+      connector-nfs=ghcr.io/pnhoang75/ai-data-pipeline/connector-nfs,
+      doc-processor=ghcr.io/pnhoang75/ai-data-pipeline/doc-processor,
+      pipeline-operator=ghcr.io/pnhoang75/ai-data-pipeline/pipeline-operator,
+      metadata-service=ghcr.io/pnhoang75/ai-data-pipeline/metadata-service
+
+    # Update strategy: digest (tracks the latest pushed digest, no semver required)
+    argocd-image-updater.argoproj.io/rag-api.update-strategy: digest
+    argocd-image-updater.argoproj.io/quota-service.update-strategy: digest
+    argocd-image-updater.argoproj.io/embedding-worker.update-strategy: digest
+    argocd-image-updater.argoproj.io/bff.update-strategy: digest
+    argocd-image-updater.argoproj.io/connector-s3.update-strategy: digest
+    argocd-image-updater.argoproj.io/connector-nfs.update-strategy: digest
+    argocd-image-updater.argoproj.io/doc-processor.update-strategy: digest
+    argocd-image-updater.argoproj.io/pipeline-operator.update-strategy: digest
+    argocd-image-updater.argoproj.io/metadata-service.update-strategy: digest
+
+    # Write-back: commit the updated image tag to git so ArgoCD applies it.
+    # Image Updater commits to .argocd-source-ai-pipeline-staging.yaml in k8s/overlays/staging/.
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/git-branch: main
+
+    # Require GHCR credentials for image polling
+    argocd-image-updater.argoproj.io/pull-secret: pullsecret:argocd/ghcr-credentials
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/pnhoang75/AIDataPipeline.git
+    targetRevision: main
+    path: k8s/overlays/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai-pipeline
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

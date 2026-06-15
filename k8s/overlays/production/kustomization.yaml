@@ -1,0 +1,69 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ai-pipeline
+
+resources:
+  - ../../pipeline
+
+# Production image tags are promoted manually from staging.
+# To update: run scripts/promote-to-production.sh <COMMIT_SHA>
+# which commits updated newTag values here.
+# :latest is NEVER used — K8sBlockLatestImageTag Gatekeeper constraint
+# (k8s/operators/gatekeeper/constraints.yaml) rejects pods with :latest images.
+images:
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/rag-api
+    newTag: PROMOTE_FROM_STAGING
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/quota-service
+    newTag: PROMOTE_FROM_STAGING
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/embedding-worker
+    newTag: PROMOTE_FROM_STAGING
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/bff
+    newTag: PROMOTE_FROM_STAGING
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/connector-s3
+    newTag: PROMOTE_FROM_STAGING
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/connector-nfs
+    newTag: PROMOTE_FROM_STAGING
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/doc-processor
+    newTag: PROMOTE_FROM_STAGING
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/pipeline-operator
+    newTag: PROMOTE_FROM_STAGING
+  - name: ghcr.io/pnhoang75/ai-data-pipeline/metadata-service
+    newTag: PROMOTE_FROM_STAGING
+
+# Production-specific patches: full replicas, Gatekeeper failurePolicy:Fail overlay
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: rag-api
+      spec:
+        replicas: 2
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: embedding-worker
+      spec:
+        replicas: 2
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: doc-processor
+      spec:
+        replicas: 2
+  # Flip Gatekeeper webhook failurePolicy to Fail in production
+  - target:
+      group: admissionregistration.k8s.io
+      version: v1
+      kind: ValidatingWebhookConfiguration
+      name: gatekeeper-validating-webhook-configuration
+    patch: |-
+      - op: replace
+        path: /webhooks/0/failurePolicy
+        value: Fail
+
+commonLabels:
+  environment: production
