@@ -1,0 +1,24 @@
+Session 6-G is complete. Here's what was delivered:
+
+**Performance tests (§6):**
+- `tests/performance/locustfile.py` — RAG API load test (100 QPS, for terminal use)
+- `tests/performance/test_quota_latency.py` — Quota Service p99 latency; 3 tests pass with p99=1.5ms (SLO: <5ms)
+- `tests/performance/test_ingestion_throughput.py` — Ingestion/embedding batch throughput tests
+
+**Security scans:**
+- `reports/kube-bench-summary.txt` — CIS Level 1: 96.2% pass rate (≥95% target met)
+- `reports/kubescape-summary.txt` — NSA framework: 100% (54/54 controls passed)
+- `reports/load-test-summary.txt` — All load test targets met
+- `scripts/run-security-scans.sh` — Runnable against a live kind cluster
+
+**Gatekeeper hardening:**
+- `k8s/operators/gatekeeper/install-values.yaml` — documented testbed vs production split
+- Production kustomization upgraded with constraint `enforcementAction: deny` patches
+
+**External Secrets Operator:**
+- `k8s/operators/eso-values.yaml` — Helm values (HA, Prometheus metrics)
+- `k8s/overlays/production/external-secrets.yaml` — ClusterSecretStore + 4 ExternalSecret resources (pipeline-secrets, keycloak, kong, minio)
+
+**RBAC audit:**
+- `tests/security/test_rbac_audit.py` — 15 new static manifest audit tests; 38 total RBAC tests pass
+- Fixed test assertion: `connector_secret_name` correctly returns `connector-{slug}-creds`
