@@ -1,5 +1,7 @@
 # AI Data Pipeline
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A full-stack, multi-tenant RAG (Retrieval-Augmented Generation) data pipeline, designed and built Kubernetes-native from the ground up — source connectors, document processing, embedding generation, vector storage, and a query API, with quota management, GitOps deployment, and a security/compliance posture suitable for a real multi-tenant SaaS.
 
 Built end-to-end across a 52-session autonomous implementation plan (see [`docs/sessions.json`](docs/sessions.json) and [`docs/execution-progress.json`](docs/execution-progress.json)).
@@ -113,3 +115,7 @@ On a resource-constrained laptop, the full stack (all operators + monitoring + a
 ## Status
 
 All 52 planned implementation sessions are complete (`docs/execution-progress.json`). The full ingest-to-retrieval path has been validated end-to-end against the real service code.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
