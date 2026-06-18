@@ -1,14 +1,14 @@
 {
-  "current_index": 0,
-  "current_session": "7-A",
-  "status": "running",
-  "last_completed": null,
-  "last_completed_at": null,
+  "current_index": 1,
+  "current_session": "7-B",
+  "status": "pending",
+  "last_completed": "7-A",
+  "last_completed_at": "2026-06-18T16:30:00Z",
   "last_attempt_at": "2026-06-18T16:17:18Z",
   "window_started_at": "2026-06-18T00:00:00Z",
   "window_reset_at": null,
-  "sessions_this_window": 0,
+  "sessions_this_window": 1,
   "retry_count": 0,
-  "sessions_completed": [],
+  "sessions_completed": ["7-A"],
   "sessions_failed": []
 }
