@@ -21,6 +21,26 @@ Full-stack AI data pipeline on Kubernetes. Design docs in `docs/`. Implementatio
 6. **Stop after the sentinel is created.** Do not begin the next session.
 7. If a test fails after 5 fix attempts, add a `# TODO: fix <error>` comment, commit, and create the sentinel anyway.
 
+## When running autonomously (via sdk-auto-execute.sh)
+
+1. **Read `docs/sdk-execution-progress.json` first** to know which session you are on.
+2. **Read only `docs/sdk-implementation-plan.md`** — specifically the phase matching the current session.
+3. **Run tests scoped to the current package only:**
+   ```
+   pytest tests/unit/sdk/ -x --tb=short -q          # Python SDK sessions
+   pytest tests/unit/mcp-server/ -x --tb=short -q   # MCP server sessions
+   cd sdk-ts && npm test -- --testPathPattern=<name> # TS SDK sessions
+   ```
+   Never run the full test suite.
+4. **Commit after every passing test suite.** Never leave uncommitted work.
+5. **Create the session sentinel when done:**
+   ```
+   mkdir -p .sessions-done && touch .sessions-done/<session-id>
+   git add .sessions-done/<session-id> && git commit -m "session <id>: complete"
+   ```
+6. **Stop after the sentinel is created.** Do not begin the next session.
+7. If a test fails after 5 fix attempts, add a `# TODO: fix <error>` comment, commit, and create the sentinel anyway.
+
 ## Repository layout (to be built)
 ```
 services/
@@ -33,7 +53,11 @@ services/
   bff/                # Phase 3-A
   pipeline-operator/  # Phase 4-A
   metadata-service/   # Phase 5-D
+  mcp-server/         # Phase 8 — MCP server
 frontend/             # Phase 3-E
+sdk/
+  python/             # Phase 7 — Python SDK (ai-pipeline-sdk PyPI package)
+sdk-ts/               # Phase 9 — TypeScript SDK (@ai-pipeline/sdk npm package)
 k8s/
   base/               # namespace, NetworkPolicy manifests
   operators/          # Helm values + CRs for infrastructure operators
@@ -46,14 +70,21 @@ tests/
   chaos/
   performance/
 scripts/
-  auto-execute.sh     # autonomous executor
-  sessions/           # per-session prompt overrides (optional)
+  auto-execute.sh         # original 52-session executor
+  sdk-auto-execute.sh     # SDK/MCP executor (phases 7-10)
+  sessions/               # per-session prompt overrides (original)
+  sdk-sessions/           # per-session prompt overrides (SDK)
 docs/
-  sessions.json           # 52-session registry
-  execution-progress.json # current executor state
+  sessions.json               # 52-session registry (original)
+  execution-progress.json     # original executor state
+  sdk-sessions.json           # 24-session registry (SDK/MCP)
+  sdk-execution-progress.json # SDK executor state
   implementation-plan.md
+  sdk-implementation-plan.md
   test-plan.md
-logs/sessions/        # per-session claude output logs
+  mcp-usage.md            # MCP client examples (created in session 8-G)
+logs/sessions/        # per-session claude output logs (original)
+logs/sdk-sessions/    # per-session claude output logs (SDK)
 .sessions-done/       # sentinel files created on session completion
 reports/              # kube-bench, trivy scan outputs
 ```
