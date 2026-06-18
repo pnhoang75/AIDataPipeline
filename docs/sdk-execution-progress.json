@@ -1,7 +1,7 @@
 {
   "current_index": 2,
   "current_session": "7-C",
-  "status": "session_complete",
+  "status": "capacity_reserved",
   "last_completed": "7-B",
   "last_completed_at": "2026-06-18T16:21:35Z",
   "last_attempt_at": "2026-06-18T16:30:00Z",
