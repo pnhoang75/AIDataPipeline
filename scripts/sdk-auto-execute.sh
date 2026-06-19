@@ -533,6 +533,19 @@ main() {
   fi
 
   $DRY_RUN && warn "DRY-RUN mode"
+
+  # ── Auto-reset window counter on fresh start ──────────────────────────────
+  # If the previous run stopped via capacity reservation (not a crash or limit),
+  # the user has manually re-run the script — meaning their Claude Pro window
+  # has reset. Clear the per-window counter so sessions can run again.
+  local prev_status
+  prev_status=$(progress_get "status")
+  if [[ "$prev_status" == "capacity_reserved" && "$SESSIONS_PER_WINDOW" -gt 0 ]]; then
+    log "Previous run stopped for capacity reservation — resetting window counter for new window."
+    reset_window_count
+    py_progress "status" "resuming"
+  fi
+
   sep
 
   local total; total=$(session_count)
